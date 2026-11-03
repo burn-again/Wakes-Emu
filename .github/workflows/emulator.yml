@@ -1,0 +1,79 @@
+name: Emulator
+
+# Builds Wakes-Emu (emulator/README.md) from firmware/src, runs its native and wasm
+# tests, and publishes the browser build to GitHub Pages from main.
+# One-time setup for the Pages part: Settings -> Pages -> Source: GitHub Actions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/**'
+      - 'config/**'
+      - 'third_party/**'
+      - 'tools/**'
+      - 'emulator/**'
+      - '.github/workflows/emulator.yml'
+  pull_request:
+    paths:
+      - 'firmware/**'
+      - 'config/**'
+      - 'third_party/**'
+      - 'tools/**'
+      - 'emulator/**'
+      - '.github/workflows/emulator.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain (clang wasm32-wasi, libc++, Binaryen)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld wasi-libc libclang-rt-18-dev-wasm32 \
+            libc++-18-dev-wasm32 libc++abi-18-dev-wasm32 binaryen
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build (native harness and web)
+        run: sh emulator/build.sh
+
+      - name: Boot, TRIG and power-off (native)
+        run: |
+          build/emu/native/wakes_headless --ms 9000 --quiet \
+            0:fnc=1 2000:fnc=0 2500:rwd=1 2600:rwd=0 4000:fnc=1 8500:fnc=0
+
+      - name: Lifecycle (wasm, in Node)
+        run: node emulator/web/test-node.mjs
+
+      - name: Package the page
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: emulator/web
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

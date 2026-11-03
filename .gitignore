@@ -22,3 +22,8 @@ __pycache__/
 *.af
 *~lock~
 .~lock.*#
+
+# Wakes-Emu: the wasm build is made by emulator/build.sh web (and by CI for Pages)
+emulator/web/wakes.wasm
+# ...but the emulator's stand-in Zephyr headers are source, not a west checkout
+!emulator/include/zephyr/
