@@ -137,6 +137,8 @@ build() {   # $1 = native|web
 			--pass-arg='asyncify-removelist@_ZN6plaits*,_ZNK6plaits*,_ZN7marbles*,_ZNK7marbles*,_ZN6stmlib*,_ZNK6stmlib*' \
 			-o "$HERE/web/wakes.wasm"
 		echo "[web] $HERE/web/wakes.wasm ($(wc -c < "$HERE/web/wakes.wasm") bytes)"
+		# The manual and the reference docs, beside the page (emulator/web/manual/).
+		echo "[web] $(python3 "$HERE/tools/gen_manual.py" "$HERE/web/manual")"
 	fi
 }
 

@@ -22,6 +22,7 @@
 	--body: #2b2d30;           /* the device itself: same in both themes     */
 	--body-edge: #1d1f21;
 	--strip: #9a9fa4;
+	--strip-down: #7c8187;
 	--strip-ink: #2a2d30;
 	--key: #3a3d41;
 	--key-down: #55595e;
@@ -40,14 +41,14 @@
 	:root:not([data-theme="light"]) {
 		--bench: #15181b; --panel: #1e2226; --ink: #e5e8ea; --ink-2: #9aa3ab;
 		--line: #333a40; --signal: #ff5b4c; --ok: #5cc28c; --body: #303337;
-		--body-edge: #0e0f10; --strip: #858a8f; --strip-ink: #16181a; --key: #42464b;
+		--body-edge: #0e0f10; --strip: #858a8f; --strip-down: #6b7075; --strip-ink: #16181a; --key: #42464b;
 		--key-down: #5d6268; color-scheme: dark;
 	}
 }
 :root[data-theme="dark"] {
 	--bench: #15181b; --panel: #1e2226; --ink: #e5e8ea; --ink-2: #9aa3ab;
 	--line: #333a40; --signal: #ff5b4c; --ok: #5cc28c; --body: #303337;
-	--body-edge: #0e0f10; --strip: #858a8f; --strip-ink: #16181a; --key: #42464b;
+	--body-edge: #0e0f10; --strip: #858a8f; --strip-down: #6b7075; --strip-ink: #16181a; --key: #42464b;
 	--key-down: #5d6268; color-scheme: dark;
 }
 
@@ -98,6 +99,7 @@ header.top {
 	cursor: pointer; font-size: 13px; font-weight: 500;
 }
 .btn:hover { border-color: var(--ink-2); }
+a.btn { color: var(--ink); text-decoration: none; }
 .btn.primary { background: var(--signal); border-color: var(--signal); color: #fff; }
 .btn.primary[aria-pressed="true"] { background: var(--panel); color: var(--ink); border-color: var(--line); }
 .btn.danger { color: var(--signal); }
@@ -113,7 +115,7 @@ main.bench {
 .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
 /* ---- the device ---- */
-.device-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.device-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 26px; }
 .sp1 {
 	position: relative; width: 100%; max-width: min(340px, calc(100% - 110px)); aspect-ratio: 360 / 470;
 	display: grid; grid-template-columns: 1fr 23%;
@@ -179,18 +181,31 @@ main.bench {
 .key.fnc .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--strip-ink); display: block; }
 .pleds { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 13px; }
 .pleds .led { background: #5e6266; width: 8px; height: 8px; }
-.edge { position: absolute; display: flex; flex-direction: column; gap: 3px; }
-.edge.right { right: -16px; top: 14%; }
-.edge.right.lower { top: 66%; }
-.edge .key { width: 13px; height: 46px; border-radius: 0 6px 6px 0; background: var(--strip); box-shadow: 1px 1px 0 rgba(0,0,0,0.3); }
-.edge .key[data-down="1"] { background: #7b8085; transform: translateX(-1px); }
-.edge .tag {
-	position: absolute; left: 20px; top: 50%; transform: translateY(-50%);
-	font-family: var(--font-label); font-weight: 600; font-size: 11px; letter-spacing: 0.08em;
-	color: var(--ink-2); white-space: nowrap; line-height: 1.15;
+/* Edge keys, placed as the manual's diagram has them: VOL- / VOL+ on the top edge,
+   the FFWD / RWD rocker on the left edge, PLAY and "••" on the right edge. */
+.ek {
+	position: absolute; padding: 0; border: 0; cursor: pointer; background: var(--strip);
+	box-shadow: 0 1px 0 rgba(0,0,0,0.35);
 }
-.jacks { position: absolute; top: -7px; left: 9%; display: flex; gap: 10%; width: 40%; }
-.jacks i { flex: 1; height: 7px; border-radius: 2px 2px 0 0; background: var(--strip); }
+.ek[data-down="1"] { background: var(--strip-down); }
+.ek .elabel {
+	position: absolute; font-family: var(--font-label); font-weight: 600; font-size: 12px;
+	letter-spacing: 0.08em; color: var(--ink-2); white-space: nowrap; pointer-events: none;
+}
+.ek.top { top: -9px; width: 12%; height: 9px; border-radius: 3px 3px 0 0; }
+.ek.top[data-down="1"] { transform: translateY(2px); }
+.ek.top .elabel { bottom: 13px; left: 50%; transform: translateX(-50%); }
+.rocker { position: absolute; left: -12px; top: 12%; height: 14%; display: flex; flex-direction: column; width: 12px; }
+.ek.left { position: relative; width: 12px; flex: 1; }
+.ek.left.up { border-radius: 6px 0 0 0; }
+.ek.left.down { border-radius: 0 0 0 6px; border-top: 1px solid rgba(0,0,0,0.25); }
+.ek.left[data-down="1"] { transform: translateX(2px); }
+.ek.left .elabel { right: 18px; top: 50%; transform: translateY(-50%); }
+.ek.left.up .elabel::before { content: "▲ "; font-size: 9px; }
+.ek.left.down .elabel::before { content: "▼ "; font-size: 9px; }
+.ek.right { right: -12px; width: 12px; height: 15%; border-radius: 0 6px 6px 0; }
+.ek.right[data-down="1"] { transform: translateX(-2px); }
+.ek.right .elabel { left: 18px; top: 50%; transform: translateY(-50%); }
 .sp1[data-off="1"] .led::after { opacity: 0; box-shadow: none; }
 
 .hint {
@@ -275,6 +290,35 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 	max-width: 1180px; margin: 0 auto 16px; padding: 12px 14px; border: 1px solid var(--signal);
 	border-radius: var(--r); background: var(--panel);
 }
+/* manual + reference */
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px 0; }
+.tabs button {
+	border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 10px;
+	cursor: pointer; font-size: 12px; white-space: nowrap;
+}
+.tabs button .n { font-family: var(--font-mono); color: var(--ink-2); margin-right: 5px; }
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.tabs button[aria-selected="true"] .n { color: inherit; opacity: 0.7; }
+.page-view { margin: 10px 14px 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+.page-view img { display: block; width: 100%; height: auto; max-width: none; }
+.page-view.zoomed img { width: 1230px; }
+.caption { margin: 0; padding: 6px 14px 12px; font-size: 12px; color: var(--ink-2); }
+.md { padding: 6px 18px 18px; max-height: 640px; overflow: auto; font-size: 13.5px; line-height: 1.55; }
+.md h1, .md h2, .md h3, .md h4 { font-family: var(--font-label); font-weight: 600; letter-spacing: 0.02em; text-wrap: balance; margin: 1.2em 0 0.4em; line-height: 1.2; }
+.md h1 { font-size: 24px; } .md h2 { font-size: 20px; } .md h3 { font-size: 17px; } .md h4 { font-size: 15px; }
+.md p, .md ul, .md ol, .md blockquote { margin: 0.5em 0; max-width: 78ch; }
+.md ul, .md ol { padding-left: 1.4em; }
+.md code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bench); padding: 0 3px; border-radius: 3px; }
+.md pre { background: var(--term); color: var(--term-ink); padding: 10px 12px; border-radius: 4px; overflow-x: auto; }
+.md pre code { background: none; padding: 0; color: inherit; }
+.md blockquote { border-left: 3px solid var(--line); padding-left: 12px; color: var(--ink-2); }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 1.2em 0; }
+.md .tbl { overflow-x: auto; margin: 0.6em 0; }
+.md table { border-collapse: collapse; font-size: 12.5px; }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+.md th { background: var(--bench); font-weight: 600; }
+.md a { color: inherit; text-decoration-color: var(--signal); text-underline-offset: 2px; }
+@media (min-width: 861px) { .device-col { position: sticky; top: 12px; } }
 @media (prefers-reduced-motion: reduce) { .key, .led::after { transition: none; } }
 </style>
 </head>
@@ -292,10 +336,17 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 <div class="blocked" id="blocked" hidden></div>
 
 <main class="bench">
-	<section class="col" aria-label="The SP-1">
+	<section class="col device-col" aria-label="The SP-1">
 		<div class="device-wrap">
 			<div class="sp1" id="sp1" data-off="1">
-				<div class="jacks" aria-hidden="true"><i></i><i></i></div>
+				<button class="key ek top" type="button" data-btn="VOL_DOWN" style="left:9%" aria-label="Volume down"><span class="elabel">VOL−</span></button>
+				<button class="key ek top" type="button" data-btn="VOL_UP" style="left:25%" aria-label="Volume up"><span class="elabel">VOL+</span></button>
+				<div class="rocker" role="group" aria-label="Rocker">
+					<button class="key ek left up" type="button" data-btn="FFWD" aria-label="Rocker up (FFWD)"><span class="elabel">FFWD</span></button>
+					<button class="key ek left down" type="button" data-btn="RWD" aria-label="Rocker down (RWD)"><span class="elabel">RWD</span></button>
+				</div>
+				<button class="key ek right" type="button" data-btn="PLAY" style="top:11%" aria-label="Play"><span class="elabel">PLAY</span></button>
+				<button class="key ek right" type="button" data-btn="FNC" style="top:73%" aria-label="Function (••)"><span class="elabel">••</span></button>
 				<div class="face">
 					<div class="faders" id="faders"></div>
 					<div class="tleds">
@@ -310,26 +361,16 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 					</div>
 				</div>
 				<div class="strip">
-					<button class="key play" type="button" data-btn="PLAY" aria-label="Play">
+					<button class="key play" type="button" data-btn="PLAY" tabindex="-1" aria-hidden="true">
 						<svg viewBox="0 0 22 20" aria-hidden="true"><path d="M11 1 21 19H1z" fill="var(--signal)"/></svg>
 					</button>
 					<div class="pleds">
 						<span class="led" id="pled0"></span><span class="led" id="pled1"></span>
 						<span class="led" id="pled2"></span><span class="led" id="pled3"></span>
 					</div>
-					<button class="key fnc" type="button" data-btn="FNC" aria-label="Function (••)">
+					<button class="key fnc" type="button" data-btn="FNC" tabindex="-1" aria-hidden="true">
 						<span class="dots" aria-hidden="true"><i></i><i></i></span>
 					</button>
-				</div>
-				<div class="edge right" aria-label="Volume">
-					<button class="key" type="button" data-btn="VOL_UP" aria-label="Volume up"></button>
-					<button class="key" type="button" data-btn="VOL_DOWN" aria-label="Volume down"></button>
-					<span class="tag">VOL<br>+ / −</span>
-				</div>
-				<div class="edge right lower" aria-label="Rocker">
-					<button class="key" type="button" data-btn="FFWD" aria-label="Fast forward"></button>
-					<button class="key" type="button" data-btn="RWD" aria-label="Rewind"></button>
-					<span class="tag">FFWD<br>RWD</span>
 				</div>
 			</div>
 			<p class="hint" id="hint"><strong>Hold •• for 1.5 s</strong> to switch Wakes on, exactly as on the device. Hold it 3 s to switch off.</p>
@@ -337,14 +378,30 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 				<span><kbd>F</kbd></span><span>•• (hold for on / off, hold as SHIFT)</span>
 				<span><kbd>1</kbd>–<kbd>4</kbd></span><span>T1–T4</span>
 				<span><kbd>Space</kbd></span><span>PLAY</span>
-				<span><kbd>←</kbd> <kbd>→</kbd></span><span>RWD / FFWD</span>
-				<span><kbd>↑</kbd> <kbd>↓</kbd></span><span>VOL + / −</span>
+				<span><kbd>↑</kbd> <kbd>↓</kbd></span><span>rocker up / down (FFWD / RWD)</span>
+				<span><kbd>←</kbd> <kbd>→</kbd></span><span>VOL− / VOL+ (top edge)</span>
 				<span><kbd>Alt</kbd>+click</span><span>latch a key down, for combos</span>
 			</div>
 		</div>
 	</section>
 
 	<section class="col" aria-label="Bench">
+		<div class="inst" id="manual-panel">
+			<div class="head">
+				<h2>Manual</h2><span class="sub" id="manual-sub">Wakes, by Adara Barami (Worldwave)</span>
+				<span class="spacer"></span>
+				<label class="check"><input type="checkbox" id="manual-follow" checked> Follow Wakes</label>
+				<button class="btn" type="button" id="manual-zoom" aria-pressed="false">Zoom</button>
+				<a class="btn" id="manual-pdf" href="manual/Wakes-Manual.pdf" target="_blank" rel="noopener">PDF</a>
+			</div>
+			<div class="tabs" id="manual-tabs" role="tablist" aria-label="Manual pages"></div>
+			<div class="page-view" id="manual-view">
+				<img id="manual-img" alt="" hidden>
+				<p class="empty" id="manual-empty" hidden></p>
+			</div>
+			<p class="caption" id="manual-caption" aria-live="polite"></p>
+		</div>
+
 		<div class="inst">
 			<div class="head"><h2>Bench supply</h2><span class="sub">What the SP-1 is plugged into</span></div>
 			<div class="body supply">
@@ -417,6 +474,15 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 				<input type="file" id="upload" multiple hidden>
 				<button class="btn danger" type="button" id="erase">Erase drive</button>
 			</div>
+		</div>
+		<div class="inst" id="ref-panel">
+			<div class="head">
+				<h2>Reference</h2><span class="sub">Wakes' docs: every control, engine and setting</span>
+				<span class="spacer"></span>
+				<a class="btn" id="ref-github" href="https://github.com/Worldwave/Wakes/tree/main/docs" target="_blank" rel="noopener">On GitHub</a>
+			</div>
+			<div class="tabs" id="ref-tabs" role="tablist" aria-label="Reference documents"></div>
+			<div class="md" id="ref-body"><p class="empty">Loading…</p></div>
 		</div>
 	</section>
 </main>

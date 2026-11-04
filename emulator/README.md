@@ -23,20 +23,31 @@ Wakes prints `powering off, press "••" to start` and goes to SYSTEM_OFF. Hol
 is SHIFT, held 3 s switches off, a double tap opens SETTINGS, and so on
 (`docs/UI-PAGES.md`).
 
+The device is drawn as the manual's diagram has it: VOL− and VOL+ on the top edge, the
+rocker on the left edge (up is FFWD, BRST on the Plaits page; down is RWD, a single
+TRIG), PLAY and `••` on the right edge, beside the ▲ and the two dots.
+
 | Key | SP-1 control |
 |---|---|
 | **F** | `••` |
 | **1**–**4** | T1–T4 |
 | **Space** | PLAY |
-| **←** / **→** | RWD / FFWD |
-| **↑** / **↓** | VOL+ / VOL− |
+| **↑** / **↓** | the rocker: up (FFWD) / down (RWD) |
+| **←** / **→** | VOL− / VOL+ |
 | Alt + click | latch a key down, for combinations such as `••` + T2 |
 
 Faders take a drag, the scroll wheel, or the arrow keys once focused. The bench beside
 the device sets the USB-C cable (unplugged, a charger, or a computer: USB-MIDI and the
 CDC console), the battery voltage, and MIDI notes (an on-screen octave, or a MIDI
 keyboard where the browser allows Web MIDI). The serial console shows everything Wakes
-prints. The WAKES drive panel is the eMMC volume: edit a `.cnfg`, save it, switch Wakes
+prints.
+
+The **Manual** panel holds the nine pages of `docs/Wakes - Manual.pdf`, and with *Follow
+Wakes* on it turns to the page for what Wakes is showing: Plaits, Marbles' t or X side,
+SETTINGS (it reads the `MODULE`, `MARBLES` and `PAGE` lines Wakes prints). The
+**Reference** panel renders the docs beside it: the control map (`docs/UI-PAGES.md`), the
+Plaits engines, the Marbles settings, MIDI, the defaults, and the safety rules. Both are
+copied next to the page by `build.sh web` (the page images need poppler's `pdftoppm`). The WAKES drive panel is the eMMC volume: edit a `.cnfg`, save it, switch Wakes
 off and on, and it reads the new file. The drive is kept in your browser between visits.
 
 **Headless.** For scripted checks and CI:
@@ -118,8 +129,10 @@ emulator/
   src/emu_emmc.c         sp1_emmc.h stand-in;  src/emu_uac.c: sp1_uac.h stand-in
   src/emu_arch_*.c       thread switching: ucontext (native), Asyncify (wasm)
   native/wakes_headless.c  scripted runs, WAV and drive out
-  web/                   index.html, app.js (the bench page), emu-core.js (device runtime), worklet.js
+  web/                   index.html, app.js (the bench page), emu-core.js (device runtime), worklet.js,
+                         md.js (renders the reference docs); manual/ is generated
   tools/gen_config.py    emu_autoconf.h + app version from firmware/Kconfig, prj.conf, VERSION
+  tools/gen_manual.py    manual pages (PNG), the PDF and the reference docs, into web/manual/
 ```
 
 The web build needs clang/lld 18+, a wasm32-wasi sysroot with libc++, and Binaryen's
@@ -127,7 +140,7 @@ The web build needs clang/lld 18+, a wasm32-wasi sysroot with libc++, and Binary
 
 ```sh
 sudo apt-get install clang lld wasi-libc libclang-rt-18-dev-wasm32 \
-    libc++-18-dev-wasm32 libc++abi-18-dev-wasm32 binaryen
+    libc++-18-dev-wasm32 libc++abi-18-dev-wasm32 binaryen poppler-utils
 ```
 
 On macOS, Homebrew's `llvm`, `lld`, `wasi-libc`, `wasi-runtimes` and `binaryen` should

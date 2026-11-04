@@ -2,6 +2,7 @@
 // plays the I2S stream, shows the CDC console and the WAKES drive.
 import { WakesDevice, BTN, USB, RESETREAS, STOP, STOP_NAME, driveToJson, driveFromJson }
 	from './emu-core.js';
+import { renderMarkdown } from './md.js';
 
 const $ = (id) => document.getElementById(id);
 const DRIVE_KEY = 'wakes-emu-drive-v1';
@@ -36,6 +37,7 @@ function consoleOut(s) {
 		appendText(line, warn ? 'w' : (/^\[(ON|STANDBY)\]|^(AUD|CPU|BLK) /.test(line) ? 'd' : ''));
 		const m = /=== Wakes v(\S+) ===/.exec(line);
 		if (m) { $('fw-version').textContent = `firmware v${m[1]}`; }
+		followManual(line);
 	}
 }
 function hostNote(s) { appendText(`── ${s} ──\n`, 'h'); }
@@ -213,8 +215,9 @@ document.querySelectorAll('[data-btn]').forEach((el) => {
 	el.addEventListener('contextmenu', (e) => e.preventDefault());
 });
 
+// The rocker is vertical on the left edge; VOL- and VOL+ sit side by side on the top edge.
 const KEYMAP = { f: FNC, F: FNC, '1': 'T1', '2': 'T2', '3': 'T3', '4': 'T4', ' ': 'PLAY',
-	ArrowLeft: 'RWD', ArrowRight: 'FFWD', ArrowUp: 'VOL_UP', ArrowDown: 'VOL_DOWN' };
+	ArrowUp: 'FFWD', ArrowDown: 'RWD', ArrowLeft: 'VOL_DOWN', ArrowRight: 'VOL_UP' };
 // Leave a key to the focused control when that control uses it.
 function typing(e) {
 	const t = e.target;
@@ -518,9 +521,166 @@ setInterval(() => {
 }, 1000);
 setInterval(saveDrive, 5000);
 
+// ------------------------------------------------------------------ manual + reference
+const UPSTREAM = 'https://github.com/Worldwave/Wakes/blob/main/';
+const manual = { pages: [], cur: 0, docs: [], doc: null, module: 'plaits' };
+const PAGE_RE = {
+	plaits: /plaits.*base/i, plaitsSettings: /plaits.*settings/i,
+	marblesT: /marbles.*\bt\b/i, marblesX: /marbles.*\bx\b/i, marblesSettings: /marbles.*settings/i,
+};
+
+function pageNo(key) {
+	const p = manual.pages.find((x) => PAGE_RE[key].test(x.title));
+	return p ? p.n : 0;
+}
+
+function showPage(n, why) {
+	const p = manual.pages.find((x) => x.n === n);
+	if (!p) { return; }
+	manual.cur = n;
+	const img = $('manual-img');
+	img.src = `manual/${p.img}`;
+	img.alt = `Wakes manual, page ${n}: ${p.title}`;
+	img.hidden = false;
+	document.querySelectorAll('#manual-tabs button').forEach((b) => {
+		b.setAttribute('aria-selected', Number(b.dataset.n) === n ? 'true' : 'false');
+	});
+	$('manual-caption').textContent = `Pg. ${n} · ${p.title}${why ? ` · ${why}` : ''}`;
+}
+
+// Turn the manual to the page Wakes is on, from what it prints on its console.
+function followManual(line) {
+	if (!manual.pages.length) { return; }
+	let m, key = null, why = '';
+	if ((m = /^SYN plaits .*module=(\w+)/.exec(line))) {
+		manual.module = m[1];
+		key = m[1] === 'marbles' ? 'marblesT' : 'plaits';
+		why = `Wakes starts on ${m[1] === 'marbles' ? 'Marbles' : 'Plaits'}`;
+	} else if (/^MODULE plaits/.test(line)) {
+		manual.module = 'plaits'; key = 'plaits'; why = 'Wakes switched to Plaits';
+	} else if ((m = /^(?:MODULE marbles \(|MARBLES )(t|X) page/.exec(line))) {
+		manual.module = 'marbles'; key = m[1] === 'X' ? 'marblesX' : 'marblesT';
+		why = `Marbles, ${m[1]} side`;
+	} else if (/^PAGE settings/.test(line)) {
+		key = manual.module === 'marbles' ? 'marblesSettings' : 'plaitsSettings'; why = 'SETTINGS';
+	} else if (/^(PAGE base|SHIFT released -> base)/.test(line) && manual.module === 'plaits') {
+		key = 'plaits'; why = 'back to Plaits BASE';
+	}
+	if (!key || !$('manual-follow').checked) { return; }
+	const n = pageNo(key);
+	if (n && n !== manual.cur) { showPage(n, `following Wakes: ${why}`); }
+}
+
+function linkFor(href) {
+	if (/^[a-z]+:/i.test(href)) { return { href }; }
+	if (href.startsWith('#')) { return { anchor: href.slice(1) }; }
+	const [path, anchor] = href.split('#');
+	const base = path.split('/').pop();
+	if (manual.docs.some((d) => d.file === base)) { return { doc: base, anchor }; }
+	return { href: new URL(href, `${UPSTREAM}docs/`).href };
+}
+
+async function openDoc(file, anchor) {
+	const body = $('ref-body');
+	manual.doc = file;
+	document.querySelectorAll('#ref-tabs button').forEach((b) => {
+		b.setAttribute('aria-selected', b.dataset.file === file ? 'true' : 'false');
+	});
+	$('ref-github').href = `${UPSTREAM}docs/${encodeURIComponent(file)}`;
+	try {
+		const r = await fetch(`manual/${file}`);
+		if (!r.ok) { throw new Error(`HTTP ${r.status}`); }
+		body.innerHTML = renderMarkdown(await r.text(), { link: linkFor });
+	} catch {
+		body.innerHTML = '';
+		const p = document.createElement('p');
+		p.className = 'empty';
+		p.append('This document is copied next to the page by emulator/build.sh web. Read it on ');
+		const a = document.createElement('a');
+		a.href = `${UPSTREAM}docs/${encodeURIComponent(file)}`;
+		a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'GitHub';
+		p.append(a, '.');
+		body.append(p);
+	}
+	const target = anchor ? body.querySelector(`#${CSS.escape(anchor)}`) : null;
+	body.scrollTop = target ? target.offsetTop - body.offsetTop - 8 : 0;
+}
+
+$('ref-body').addEventListener('click', (e) => {
+	const a = e.target.closest('a[data-doc], a[data-anchor]');
+	if (!a) { return; }
+	e.preventDefault();
+	if (a.dataset.doc) {
+		openDoc(a.dataset.doc, a.dataset.anchor);
+	} else {
+		const t = $('ref-body').querySelector(`#${CSS.escape(a.dataset.anchor)}`);
+		if (t) { $('ref-body').scrollTop = t.offsetTop - $('ref-body').offsetTop - 8; }
+	}
+});
+
+function setZoom(on) {
+	$('manual-view').classList.toggle('zoomed', on);
+	$('manual-zoom').setAttribute('aria-pressed', on ? 'true' : 'false');
+	$('manual-zoom').textContent = on ? 'Fit' : 'Zoom';
+}
+$('manual-zoom').addEventListener('click', () => setZoom(!$('manual-view').classList.contains('zoomed')));
+$('manual-img').addEventListener('click', () => setZoom(!$('manual-view').classList.contains('zoomed')));
+
+const DEFAULT_DOCS = [
+	{ file: 'UI-PAGES.md', tab: 'Controls' }, { file: 'PLAITS-ENGINES.md', tab: 'Plaits engines' },
+	{ file: 'MARBLES-SETTINGS.md', tab: 'Marbles' }, { file: 'MIDI.md', tab: 'MIDI' },
+	{ file: 'DEFAULTS.md', tab: 'Defaults' }, { file: 'SAFETY.md', tab: 'Safety' },
+];
+
+async function loadManual() {
+	let info = null;
+	try {
+		const r = await fetch('manual/manual.json');
+		if (r.ok) { info = await r.json(); }
+	} catch { /* shown below */ }
+	manual.pages = (info && info.pages) || [];
+	manual.docs = (info && info.docs && info.docs.length) ? info.docs : DEFAULT_DOCS;
+	if (!info || !info.pdf) {
+		$('manual-pdf').href = `${UPSTREAM}docs/Wakes%20-%20Manual.pdf`;
+	}
+	const tabs = $('manual-tabs');
+	for (const p of manual.pages) {
+		const b = document.createElement('button');
+		b.type = 'button';
+		b.dataset.n = String(p.n);
+		b.setAttribute('role', 'tab');
+		b.innerHTML = '<span class="n"></span><span class="t"></span>';
+		b.querySelector('.n').textContent = String(p.n);
+		b.querySelector('.t').textContent = p.title.replace(/\s*\((left|right)\)\s*$/i, '');
+		b.addEventListener('click', () => showPage(p.n));
+		tabs.appendChild(b);
+	}
+	if (manual.pages.length) {
+		showPage(1);
+	} else {
+		const e = $('manual-empty');
+		e.hidden = false;
+		e.textContent = 'The manual pages are added by emulator/build.sh web (poppler-utils renders them). The PDF button opens the manual on GitHub.';
+		$('manual-zoom').disabled = true;
+		$('manual-follow').disabled = true;
+	}
+	const rtabs = $('ref-tabs');
+	for (const d of manual.docs) {
+		const b = document.createElement('button');
+		b.type = 'button';
+		b.dataset.file = d.file;
+		b.setAttribute('role', 'tab');
+		b.textContent = d.tab;
+		b.addEventListener('click', () => openDoc(d.file));
+		rtabs.appendChild(b);
+	}
+	openDoc(manual.docs[0].file);
+}
+
 // ------------------------------------------------------------------ start
 async function start() {
 	for (let i = 0; i < 4; i++) { setFader(i, 0.5); }
+	loadManual();
 	let module;
 	try {
 		module = await loadWasm();
