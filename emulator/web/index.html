@@ -32,6 +32,8 @@
 	--term-dim: #7d8a85;
 	--term-warn: #f0a35e;
 	--term-host: #8fb7e8;
+	--shift: #5aa9e6;          /* SHFT names, as the manual prints them */
+	--silk: #b9bfc5;           /* names printed on the device body          */
 	--font-label: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
 	--font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
 	--font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -141,6 +143,19 @@ main.bench {
 	font-family: var(--font-mono); font-size: 10px; color: #8a9096;
 	font-variant-numeric: tabular-nums;
 }
+.fader .flab, .key .klab {
+	position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; pointer-events: none;
+	font-family: var(--font-label); font-weight: 600; font-size: 11px; letter-spacing: 0.06em; color: var(--silk);
+}
+.fader .flab { top: -17px; }
+.key.tk { position: relative; }
+.key .klab { top: calc(100% + 7px); }
+.sp1[data-layer="shift"] .flab, .sp1[data-layer="shift"] .klab, .sp1[data-layer="shift"] .ek .elabel { color: var(--shift); }
+.lednote {
+	position: absolute; left: calc(100% + 18px); top: 44%; max-width: 70px; pointer-events: none;
+	font-family: var(--font-label); font-weight: 600; font-size: 11px; letter-spacing: 0.06em; color: var(--ink-2);
+	line-height: 1.15;
+}
 .fader:focus-visible .knob { outline: 2px solid var(--signal); outline-offset: 2px; }
 .tleds { display: grid; grid-template-columns: repeat(4, 1fr); justify-items: center; padding-block: 34px 18px; }
 .led {
@@ -214,6 +229,8 @@ main.bench {
 	font-size: 13px; color: var(--ink-2);
 }
 .hint strong { color: var(--ink); font-weight: 600; }
+.holdbar { max-width: 360px; width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.holdbar .note { flex: 1; min-width: 150px; }
 .keys-legend {
 	max-width: 360px; width: 100%; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px;
 	font-size: 12px; color: var(--ink-2);
@@ -291,6 +308,32 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 	border-radius: var(--r); background: var(--panel);
 }
 /* manual + reference */
+.opts { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 8px 14px 0; }
+.page-inner { position: relative; }
+.hot { position: absolute; inset: 0; pointer-events: none; }
+.hs {
+	position: absolute; pointer-events: auto; padding: 0; cursor: pointer; background: rgba(211, 58, 44, 0.06);
+	border: 1px dashed rgba(211, 58, 44, 0.55); border-radius: 3px;
+}
+.hs.shift { border-color: rgba(60, 140, 210, 0.7); background: rgba(60, 140, 210, 0.07); }
+.hs:hover, .hs:focus-visible { background: rgba(211, 58, 44, 0.2); border-style: solid; outline: none; }
+.hs.shift:hover, .hs.shift:focus-visible { background: rgba(60, 140, 210, 0.22); }
+.hs.fdr { cursor: ns-resize; }
+.try {
+	display: inline-flex; align-items: center; gap: 3px; margin: 2px 4px 0 0; padding: 0 7px; height: 20px;
+	border: 1px solid var(--signal); border-radius: 999px; background: transparent; color: var(--signal);
+	font: 600 11px var(--font-mono); cursor: pointer; vertical-align: middle; white-space: nowrap;
+}
+.try:hover { background: var(--signal); color: #fff; }
+.try-row { display: block; margin-top: 3px; }
+.rec { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.rec .status { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); flex: 1; min-width: 180px; }
+.rec .status.live { color: var(--signal); }
+.rec-out {
+	margin: 10px 0 0; padding: 10px 12px; background: var(--term); color: var(--term-ink); border-radius: 4px;
+	font: 12px/1.5 var(--font-mono); white-space: pre; overflow-x: auto; max-height: 220px;
+}
+.toast { font-size: 12px; color: var(--signal); min-height: 1em; margin: 6px 14px 0; }
 .tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px 0; }
 .tabs button {
 	border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 10px;
@@ -299,7 +342,7 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 .tabs button .n { font-family: var(--font-mono); color: var(--ink-2); margin-right: 5px; }
 .tabs button[aria-selected="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
 .tabs button[aria-selected="true"] .n { color: inherit; opacity: 0.7; }
-.page-view { margin: 10px 14px 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+.page-view { position: relative; margin: 10px 14px 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
 .page-view img { display: block; width: 100%; height: auto; max-width: none; }
 .page-view.zoomed img { width: 1230px; }
 .caption { margin: 0; padding: 6px 14px 12px; font-size: 12px; color: var(--ink-2); }
@@ -347,6 +390,7 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 				</div>
 				<button class="key ek right" type="button" data-btn="PLAY" style="top:11%" aria-label="Play"><span class="elabel">PLAY</span></button>
 				<button class="key ek right" type="button" data-btn="FNC" style="top:73%" aria-label="Function (••)"><span class="elabel">••</span></button>
+				<span class="lednote" id="led-note"></span>
 				<div class="face">
 					<div class="faders" id="faders"></div>
 					<div class="tleds">
@@ -374,13 +418,19 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 				</div>
 			</div>
 			<p class="hint" id="hint"><strong>Hold •• for 1.5 s</strong> to switch Wakes on, exactly as on the device. Hold it 3 s to switch off.</p>
+			<div class="holdbar">
+				<button class="btn" type="button" id="hold-mode" aria-pressed="false">Hold keys</button>
+				<button class="btn" type="button" id="let-go" disabled>Let go of all</button>
+				<span class="note" id="hold-note">Right-click a key to hold it down; right-click again to let go.</span>
+			</div>
 			<div class="keys-legend" aria-label="Keyboard">
 				<span><kbd>F</kbd></span><span>•• (hold for on / off, hold as SHIFT)</span>
 				<span><kbd>1</kbd>–<kbd>4</kbd></span><span>T1–T4</span>
 				<span><kbd>Space</kbd></span><span>PLAY</span>
 				<span><kbd>↑</kbd> <kbd>↓</kbd></span><span>rocker up / down (FFWD / RWD)</span>
 				<span><kbd>←</kbd> <kbd>→</kbd></span><span>VOL− / VOL+ (top edge)</span>
-				<span><kbd>Alt</kbd>+click</span><span>latch a key down, for combos</span>
+				<span>Right-click</span><span>hold a key down (Alt+click too); then play the rest</span>
+				<span><kbd>Esc</kbd></span><span>let go of every held key</span>
 			</div>
 		</div>
 	</section>
@@ -390,15 +440,23 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 			<div class="head">
 				<h2>Manual</h2><span class="sub" id="manual-sub">Wakes, by Adara Barami (Worldwave)</span>
 				<span class="spacer"></span>
-				<label class="check"><input type="checkbox" id="manual-follow" checked> Follow Wakes</label>
 				<button class="btn" type="button" id="manual-zoom" aria-pressed="false">Zoom</button>
 				<a class="btn" id="manual-pdf" href="manual/Wakes-Manual.pdf" target="_blank" rel="noopener">PDF</a>
 			</div>
+			<div class="opts">
+				<label class="check"><input type="checkbox" id="manual-follow" checked> Follow Wakes</label>
+				<label class="check"><input type="checkbox" id="manual-labels" checked> Names on the device</label>
+				<label class="check"><input type="checkbox" id="manual-play"> Clicks play the device</label>
+			</div>
 			<div class="tabs" id="manual-tabs" role="tablist" aria-label="Manual pages"></div>
 			<div class="page-view" id="manual-view">
-				<img id="manual-img" alt="" hidden>
+				<div class="page-inner">
+					<img id="manual-img" alt="" hidden>
+					<div class="hot" id="manual-hot"></div>
+				</div>
 				<p class="empty" id="manual-empty" hidden></p>
 			</div>
+			<p class="toast" id="play-toast" aria-live="polite"></p>
 			<p class="caption" id="manual-caption" aria-live="polite"></p>
 		</div>
 
@@ -439,6 +497,18 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 					</div>
 					<p class="note">Your computer's level. Wakes' own VOL is the side keys.</p>
 				</div>
+			</div>
+		</div>
+
+		<div class="inst">
+			<div class="head"><h2>Session recorder</h2><span class="sub">What you play, as a test you can rerun headless</span></div>
+			<div class="body">
+				<div class="rec">
+					<button class="btn primary" type="button" id="rec-btn">Record</button>
+					<button class="btn" type="button" id="rec-copy" disabled>Copy script</button>
+					<span class="status" id="rec-status">Records from a power-on: every key, fader, cable and MIDI note, at device time.</span>
+				</div>
+				<pre class="rec-out" id="rec-out" hidden></pre>
 			</div>
 		</div>
 

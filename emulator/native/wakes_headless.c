@@ -8,12 +8,15 @@
  *     --load DIR        before boot, load files from DIR onto the drive (path = relative)
  *     --resetreas HEX   reset reason at boot (default 0x10000: woken by "••")
  *     --quiet           do not print the console
+ *     --expect TEXT     fail (exit 4) unless the console printed TEXT; repeatable.
+ *                       The bench page's session recorder adds these for you.
  *   EVENT is T:what=value, at T ms:
  *     fnc=1|0  play=1|0  t1..t4=1|0  volup=1|0  voldown=1|0  ffwd=1|0  rwd=1|0
  *     f1..f4=0..1  usb=0|1|2  batt=MV  midi=90,3c,64 (hex bytes)
  *
  * The device boots once per run: a reset or SYSTEM_OFF ends the run and says why.
- * Exit status 3 if it ended in a watchdog reset, a fault or main() returning.
+ * Exit status 3 if it ended in a watchdog reset, a fault or main() returning; 4 if an
+ * --expect line was never printed.
  */
 #include "emu_api.h"
 
@@ -31,7 +34,7 @@ uint32_t emu_drive_size(int i);
 const uint8_t *emu_drive_data(int i);
 int  emu_drive_put(const char *path, const uint8_t *data, uint32_t n, int is_dir);
 
-struct ev { double t; char what[16]; char val[128]; };
+struct ev { double t; int idx; char what[16]; char val[128]; };
 static struct ev evs[512];
 static int nev;
 static uint32_t buttons;
@@ -82,10 +85,13 @@ static void apply(const struct ev *e)
 	fprintf(stderr, "unknown event %s\n", e->what);
 }
 
+/* By time, then in the order given: a press and a release at the same instant stay in order. */
 static int cmp(const void *a, const void *b)
 {
-	const double d = ((const struct ev *)a)->t - ((const struct ev *)b)->t;
-	return d < 0 ? -1 : d > 0;
+	const struct ev *x = a, *y = b;
+	const double d = x->t - y->t;
+	if (d != 0) { return d < 0 ? -1 : 1; }
+	return x->idx - y->idx;
 }
 
 static void wav_header(FILE *f, uint32_t frames)
@@ -142,7 +148,27 @@ static void load_dir(const char *root, const char *rel)
 	closedir(d);
 }
 
-static void quiet_sink(const char *s, size_t n) { (void)s; (void)n; }
+/* Everything the console printed, for --expect. */
+static char  *seen;
+static size_t seen_n, seen_cap;
+static int    quiet;
+static const char *expects[32];
+static int    nexpect;
+
+static void sink(const char *s, size_t n)
+{
+	if (seen_n + n + 1 > seen_cap) {
+		seen_cap = (seen_n + n + 1) * 2;
+		seen = realloc(seen, seen_cap);
+	}
+	memcpy(seen + seen_n, s, n);
+	seen_n += n;
+	seen[seen_n] = '\0';
+	if (!quiet) {
+		fwrite(s, 1, n, stdout);
+		fflush(stdout);
+	}
+}
 
 int main(int argc, char **argv)
 {
@@ -155,7 +181,8 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--drive") && i + 1 < argc) { drive = argv[++i]; }
 		else if (!strcmp(argv[i], "--load") && i + 1 < argc) { load = argv[++i]; }
 		else if (!strcmp(argv[i], "--resetreas") && i + 1 < argc) { resetreas = (uint32_t)strtoul(argv[++i], NULL, 16); }
-		else if (!strcmp(argv[i], "--quiet")) { emu_set_console_sink(quiet_sink); }
+		else if (!strcmp(argv[i], "--quiet")) { quiet = 1; }
+		else if (!strcmp(argv[i], "--expect") && i + 1 < argc) { if (nexpect < 32) { expects[nexpect++] = argv[++i]; } else { i++; } }
 		else if (nev < 512) {
 			struct ev *e = &evs[nev];
 			char what[160];
@@ -166,10 +193,12 @@ int main(int argc, char **argv)
 			*strchr(what, '=') = 0;
 			snprintf(e->what, sizeof(e->what), "%s", what);
 			snprintf(e->val, sizeof(e->val), "%s", what + strlen(what) + 1);
+			e->idx = nev;
 			nev++;
 		}
 	}
 	qsort(evs, (size_t)nev, sizeof(evs[0]), cmp);
+	emu_set_console_sink(sink);
 
 	if (load) {
 		load_dir(load, "");
@@ -243,5 +272,18 @@ int main(int argc, char **argv)
 	/* A watchdog reset, a fault or main() returning is a failure; SYSTEM_OFF and a soft
 	 * reset are things Wakes does on purpose. */
 	const int why = emu_stopped();
-	return (why == 3 || why == 4 || why == 5) ? 3 : 0;
+	if (why == 3 || why == 4 || why == 5) {
+		return 3;
+	}
+	int missing = 0;
+	for (int k = 0; k < nexpect; k++) {
+		if (!seen || !strstr(seen, expects[k])) {
+			fprintf(stderr, "[emu] expected on the console, never printed: %s\n", expects[k]);
+			missing++;
+		}
+	}
+	if (nexpect) {
+		fprintf(stderr, "[emu] %d of %d expectations met\n", nexpect - missing, nexpect);
+	}
+	return missing ? 4 : 0;
 }

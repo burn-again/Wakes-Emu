@@ -38,6 +38,7 @@ function consoleOut(s) {
 		const m = /=== Wakes v(\S+) ===/.exec(line);
 		if (m) { $('fw-version').textContent = `firmware v${m[1]}`; }
 		followManual(line);
+		recLine(line);
 	}
 }
 function hostNote(s) { appendText(`── ${s} ──\n`, 'h'); }
@@ -58,6 +59,8 @@ function onState(s, info) {
 			: r & RESETREAS.VBUS ? 'woken by USB' : r & RESETREAS.OFF ? 'woken by ••' : 'cold start';
 		hostNote(`power: nRF52840 boots (${why})`);
 		$('sp1').dataset.off = '0';
+		manual.module = 'plaits'; manual.side = 't'; manual.layer = 'base';
+		if (rec.armed) { recStart(r); }
 	} else {
 		const why = info.why;
 		$('sp1').dataset.off = '1';
@@ -68,6 +71,7 @@ function onState(s, info) {
 		}
 		saveDrive();
 		renderFiles();
+		if (rec.on) { recStop(why === STOP.SYSTEM_OFF ? 'the device switched off' : `the device stopped: ${STOP_NAME[why]}`); }
 	}
 }
 
@@ -175,30 +179,85 @@ function frame() {
 
 // ------------------------------------------------------------------ controls
 const FNC = 'FNC';
-const latched = new Set();
+const latched = new Set();     // keys held down by the page (right-click, Alt+click, Hold keys)
+let holdMode = false;
+const REC_NAME = { FNC: 'fnc', PLAY: 'play', T1: 't1', T2: 't2', T3: 't3', T4: 't4',
+	VOL_UP: 'volup', VOL_DOWN: 'voldown', FFWD: 'ffwd', RWD: 'rwd' };
+
+// A press shorter than two of Wakes' control scans (~18 ms) never registers, on the device
+// as here. A finger cannot press that briefly, but a click or a tap can: hold every
+// press for at least MIN_PRESS_MS before letting go.
+const MIN_PRESS_MS = 45;
+const downAt = {};
+const releaseTimer = {};
+
 function press(name, down) {
+	if (!dev) { return; }
+	clearTimeout(releaseTimer[name]);
+	if (down) {
+		downAt[name] = performance.now();
+	} else {
+		const held = performance.now() - (downAt[name] || 0);
+		if (held < MIN_PRESS_MS) {
+			releaseTimer[name] = setTimeout(() => applyPress(name, false), MIN_PRESS_MS - held);
+			return;
+		}
+	}
+	applyPress(name, down);
+}
+
+function applyPress(name, down) {
 	if (!dev) { return; }
 	if (!audio.ctx && down) {
 		startAudio().then(() => setSound(true)).catch(() => {});
 	}
+	const was = name === FNC ? !!dev.inputs.fnc : !!(dev.inputs.buttons & (1 << BTN[name]));
 	if (name === FNC) { dev.setFnc(down); } else { dev.setButton(BTN[name], down); }
 	document.querySelectorAll(`[data-btn="${name}"]`).forEach((k) => { k.dataset.down = down ? '1' : '0'; });
+	if (was !== down) { recEvent(REC_NAME[name], down ? 1 : 0); }
+	if (name === FNC) { renderDeviceLabels(); }
 	if (down) { tick(); }
+}
+
+function setLatched(name, on) {
+	if (on) { latched.add(name); } else { latched.delete(name); }
+	document.querySelectorAll(`[data-btn="${name}"]`).forEach((k) => { k.dataset.latched = on ? '1' : '0'; });
+	$('let-go').disabled = latched.size === 0;
+	$('hold-note').textContent = latched.size
+		? `Holding ${[...latched].map(keyName).join(' + ')}. Now play the rest.`
+		: holdMode ? 'Tap a key to hold it down; tap it again to let go.'
+			: 'Right-click a key to hold it down; right-click again to let go.';
+}
+
+function toggleLatch(name) {
+	if (latched.has(name)) {
+		setLatched(name, false);
+		press(name, false);
+	} else {
+		setLatched(name, true);
+		press(name, true);
+	}
+}
+
+function letGoAll() {
+	for (const n of [...latched]) { setLatched(n, false); press(n, false); }
+}
+
+function keyName(n) {
+	return { FNC: '••', VOL_UP: 'VOL+', VOL_DOWN: 'VOL−' }[n] || n;
 }
 
 document.querySelectorAll('[data-btn]').forEach((el) => {
 	const name = el.dataset.btn;
 	el.addEventListener('pointerdown', (e) => {
 		e.preventDefault();
-		if (e.altKey) {                         // latch / unlatch
-			if (latched.has(name)) {
-				latched.delete(name); el.dataset.latched = '0'; press(name, false);
-			} else {
-				latched.add(name); el.dataset.latched = '1'; press(name, true);
-			}
+		// Right-click, Alt+click, or Hold keys: the key stays down until it is clicked
+		// the same way again, so the other hand (the mouse) is free for the rest.
+		if (e.button === 2 || e.altKey || holdMode) {
+			toggleLatch(name);
 			return;
 		}
-		if (latched.has(name)) { return; }
+		if (e.button !== 0 || latched.has(name)) { return; }
 		el.setPointerCapture(e.pointerId);
 		press(name, true);
 	});
@@ -210,10 +269,23 @@ document.querySelectorAll('[data-btn]').forEach((el) => {
 		if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); e.stopPropagation(); press(name, true); }
 	});
 	el.addEventListener('keyup', (e) => {
-		if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); press(name, false); }
+		if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (!latched.has(name)) { press(name, false); } }
 	});
 	el.addEventListener('contextmenu', (e) => e.preventDefault());
 });
+document.querySelectorAll('.key.tk').forEach((k) => {
+	const l = document.createElement('span');
+	l.className = 'klab';
+	k.appendChild(l);
+});
+$('hold-mode').addEventListener('click', () => {
+	holdMode = !holdMode;
+	$('hold-mode').setAttribute('aria-pressed', holdMode ? 'true' : 'false');
+	$('hold-mode').textContent = holdMode ? 'Holding keys: on' : 'Hold keys';
+	setLatched('_', false);
+});
+$('let-go').addEventListener('click', letGoAll);
+$('sp1').addEventListener('contextmenu', (e) => e.preventDefault());
 
 // The rocker is vertical on the left edge; VOL- and VOL+ sit side by side on the top edge.
 const KEYMAP = { f: FNC, F: FNC, '1': 'T1', '2': 'T2', '3': 'T3', '4': 'T4', ' ': 'PLAY',
@@ -230,6 +302,7 @@ function typing(e) {
 	return false;
 }
 window.addEventListener('keydown', (e) => {
+	if (e.key === 'Escape' && latched.size) { letGoAll(); return; }
 	const name = KEYMAP[e.key];
 	if (!name || typing(e) || e.metaKey || e.ctrlKey) { return; }
 	e.preventDefault();
@@ -256,7 +329,7 @@ for (let i = 0; i < 4; i++) {
 	f.setAttribute('aria-orientation', 'vertical');
 	f.setAttribute('aria-valuemin', '0');
 	f.setAttribute('aria-valuemax', '100');
-	f.innerHTML = '<span class="slot"></span><span class="knob"></span><span class="val"></span>';
+	f.innerHTML = '<span class="flab"></span><span class="slot"></span><span class="knob"></span><span class="val"></span>';
 	$('faders').appendChild(f);
 	faders.push(f);
 	const setFrom = (clientY) => {
@@ -285,6 +358,7 @@ function setFader(i, v) {
 	f.querySelector('.val').textContent = Math.round(v * 4095);
 	f.setAttribute('aria-valuenow', String(Math.round(v * 100)));
 	if (dev) { dev.setFader(i, v); }
+	recEvent(`f${i + 1}`, v.toFixed(3));
 }
 
 // bench supply
@@ -293,6 +367,7 @@ document.querySelectorAll('#usb-seg button').forEach((b) => {
 		const mode = Number(b.dataset.usb);
 		document.querySelectorAll('#usb-seg button').forEach((x) => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
 		if (dev) { dev.setUsb(mode); tick(); }
+		recEvent('usb', mode);
 		midiNote();
 	});
 });
@@ -300,6 +375,7 @@ $('batt').addEventListener('input', (e) => {
 	const mv = Number(e.target.value);
 	$('batt-read').textContent = `${(mv / 1000).toFixed(2)} V`;
 	if (dev) { dev.setBattery(mv); }
+	recEvent('batt', mv);
 });
 
 // MIDI: an on-screen octave, and Web MIDI inputs where the browser allows them
@@ -308,6 +384,13 @@ function midiNote() {
 	$('midi-note').textContent = usb === USB.COMPUTER
 		? 'Wakes is enumerated as a USB-MIDI port: notes play Plaits, CCs move parameters.'
 		: 'Notes reach Wakes only while USB is set to Computer, as on the device.';
+}
+function sendMidi(bytes) {
+	if (!dev) { return; }
+	dev.sendMidi(bytes);
+	if (dev.inputs.usb === USB.COMPUTER) {
+		recEvent('midi', bytes.map((b) => b.toString(16).padStart(2, '0')).join(','));
+	}
 }
 const piano = $('piano');
 const WHITE = [0, 2, 4, 5, 7, 9, 11, 12];
@@ -318,8 +401,8 @@ function pianoKey(semi, black, leftPct) {
 	b.className = black ? 'black' : '';
 	b.setAttribute('aria-label', `MIDI note ${60 + semi}`);
 	if (black) { b.style.left = `${leftPct}%`; }
-	const on = (e) => { e.preventDefault(); b.setPointerCapture(e.pointerId); b.dataset.down = '1'; dev && dev.sendMidi([0x90, 60 + semi, 100]); };
-	const off = () => { if (b.dataset.down === '1') { b.dataset.down = '0'; dev && dev.sendMidi([0x80, 60 + semi, 0]); } };
+	const on = (e) => { e.preventDefault(); b.setPointerCapture(e.pointerId); b.dataset.down = '1'; sendMidi([0x90, 60 + semi, 100]); };
+	const off = () => { if (b.dataset.down === '1') { b.dataset.down = '0'; sendMidi([0x80, 60 + semi, 0]); } };
 	b.addEventListener('pointerdown', on);
 	b.addEventListener('pointerup', off);
 	b.addEventListener('pointercancel', off);
@@ -359,7 +442,7 @@ $('midi-in').addEventListener('change', () => {
 	if (!midiAccess) { return; }
 	for (const inp of midiAccess.inputs.values()) {
 		inp.onmidimessage = inp.id === $('midi-in').value
-			? (m) => { if (dev && m.data[0] !== 0xFE) { dev.sendMidi(Array.from(m.data)); } } : null;
+			? (m) => { if (m.data[0] !== 0xFE) { sendMidi(Array.from(m.data)); } } : null;
 	}
 });
 
@@ -523,7 +606,10 @@ setInterval(saveDrive, 5000);
 
 // ------------------------------------------------------------------ manual + reference
 const UPSTREAM = 'https://github.com/Worldwave/Wakes/blob/main/';
-const manual = { pages: [], cur: 0, docs: [], doc: null, module: 'plaits' };
+const manual = { pages: [], cur: 0, docs: [], doc: null, module: 'plaits', side: 't', layer: 'base' };
+const prefs = { labels: true, play: false };
+try { Object.assign(prefs, JSON.parse(localStorage.getItem('wakes-emu-prefs') || '{}')); } catch { /* defaults */ }
+function savePrefs() { try { localStorage.setItem('wakes-emu-prefs', JSON.stringify(prefs)); } catch { /* not kept */ } }
 const PAGE_RE = {
 	plaits: /plaits.*base/i, plaitsSettings: /plaits.*settings/i,
 	marblesT: /marbles.*\bt\b/i, marblesX: /marbles.*\bx\b/i, marblesSettings: /marbles.*settings/i,
@@ -546,30 +632,362 @@ function showPage(n, why) {
 		b.setAttribute('aria-selected', Number(b.dataset.n) === n ? 'true' : 'false');
 	});
 	$('manual-caption').textContent = `Pg. ${n} · ${p.title}${why ? ` · ${why}` : ''}`;
+	renderHotspots();
+	renderDeviceLabels();
 }
 
-// Turn the manual to the page Wakes is on, from what it prints on its console.
-function followManual(line) {
-	if (!manual.pages.length) { return; }
-	let m, key = null, why = '';
+// Where Wakes is (module, Marbles side, layer), from what it prints on its console.
+// Returns the manual page that goes with it, when the line moved it.
+function trackDevice(line) {
+	let m;
 	if ((m = /^SYN plaits .*module=(\w+)/.exec(line))) {
-		manual.module = m[1];
-		key = m[1] === 'marbles' ? 'marblesT' : 'plaits';
-		why = `Wakes starts on ${m[1] === 'marbles' ? 'Marbles' : 'Plaits'}`;
-	} else if (/^MODULE plaits/.test(line)) {
-		manual.module = 'plaits'; key = 'plaits'; why = 'Wakes switched to Plaits';
-	} else if ((m = /^(?:MODULE marbles \(|MARBLES )(t|X) page/.exec(line))) {
-		manual.module = 'marbles'; key = m[1] === 'X' ? 'marblesX' : 'marblesT';
-		why = `Marbles, ${m[1]} side`;
-	} else if (/^PAGE settings/.test(line)) {
-		key = manual.module === 'marbles' ? 'marblesSettings' : 'plaitsSettings'; why = 'SETTINGS';
-	} else if (/^(PAGE base|SHIFT released -> base)/.test(line) && manual.module === 'plaits') {
-		key = 'plaits'; why = 'back to Plaits BASE';
+		manual.module = m[1]; manual.layer = 'base';
+		return [m[1] === 'marbles' ? 'marblesT' : 'plaits', `Wakes starts on ${m[1] === 'marbles' ? 'Marbles' : 'Plaits'}`];
 	}
-	if (!key || !$('manual-follow').checked) { return; }
-	const n = pageNo(key);
-	if (n && n !== manual.cur) { showPage(n, `following Wakes: ${why}`); }
+	if (/^MODULE plaits/.test(line)) {
+		manual.module = 'plaits'; manual.layer = 'base';
+		return ['plaits', 'Wakes switched to Plaits'];
+	}
+	if ((m = /^(?:MODULE marbles \(|MARBLES )(t|X) page/.exec(line))) {
+		manual.module = 'marbles'; manual.side = m[1]; manual.layer = 'base';
+		return [m[1] === 'X' ? 'marblesX' : 'marblesT', `Marbles, ${m[1]} side`];
+	}
+	if (/^PAGE settings/.test(line)) {
+		manual.layer = 'settings';
+		return [manual.module === 'marbles' ? 'marblesSettings' : 'plaitsSettings', 'SETTINGS'];
+	}
+	if (/^(PAGE base|SHIFT released -> base)/.test(line) && manual.module === 'plaits') {
+		const left = manual.layer === 'settings';
+		manual.layer = 'base';
+		return left ? ['plaits', 'back to Plaits BASE'] : null;
+	}
+	return null;
 }
+
+function followManual(line) {
+	const hit = trackDevice(line);
+	if (!hit || !manual.pages.length || !$('manual-follow').checked) { return; }
+	const n = pageNo(hit[0]);
+	if (n && n !== manual.cur) { showPage(n, `following Wakes: ${hit[1]}`); }
+}
+
+// ---- the manual's names on the emulated device ----
+const HW = { top: ['VOL−', 'VOL+'], rocker: { up: 'FFWD', down: 'RWD' }, edge: { play: 'PLAY', fnc: '••' } };
+function renderDeviceLabels() {
+	const p = manual.pages.find((x) => x.n === manual.cur);
+	const shift = !!(dev && dev.inputs.fnc && p && p.shift);
+	const g = prefs.labels && p ? (shift ? p.shift : p.base) : null;
+	$('sp1').dataset.layer = g && shift ? 'shift' : 'base';
+	faders.forEach((f, i) => { f.querySelector('.flab').textContent = (g && g.faders[i].label) || ''; });
+	document.querySelectorAll('.key.tk').forEach((k, i) => {
+		const t = g && g.keys[i].label;
+		k.querySelector('.klab').textContent = t === '-' ? '–' : (t || '');
+	});
+	const set = (sel, text) => { const e = document.querySelector(sel); if (e) { e.textContent = text; } };
+	set('.ek.top[data-btn="VOL_DOWN"] .elabel', (g && g.top[0] && g.top[0].label) || HW.top[0]);
+	set('.ek.top[data-btn="VOL_UP"] .elabel', (g && g.top[1] && g.top[1].label) || HW.top[1]);
+	set('.ek.left.up .elabel', (g && g.rocker.up && g.rocker.up.label) || HW.rocker.up);
+	set('.ek.left.down .elabel', (g && g.rocker.down && g.rocker.down.label) || HW.rocker.down);
+	set('.ek.right[data-btn="PLAY"] .elabel', (g && g.edge.play && g.edge.play.label) || HW.edge.play);
+	set('.ek.right[data-btn="FNC"] .elabel', (g && g.edge.fnc && g.edge.fnc.label) || HW.edge.fnc);
+	$('led-note').textContent = (g && g.leds) || '';
+}
+
+// ---- clicks on the manual play the device (off unless chosen) ----
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+let performing = false;
+
+function playToast(text) {
+	$('play-toast').textContent = text;
+	clearTimeout(playToast.t);
+	playToast.t = setTimeout(() => { $('play-toast').textContent = ''; }, 4000);
+}
+
+function deviceReady() {
+	if (dev && dev.state === 'on') { return true; }
+	playToast('Switch Wakes on first: hold •• for 1.5 s.');
+	return false;
+}
+
+async function tapKey(name, ms = 110) {
+	if (latched.has(name)) { return; }
+	press(name, true);
+	await wait(ms);
+	press(name, false);
+}
+
+async function withShift(fn) {
+	const held = latched.has(FNC);
+	if (!held) { press(FNC, true); await wait(90); }
+	await fn();
+	if (!held) { await wait(90); press(FNC, false); }
+}
+
+// One gesture: { shift, ctl } with ctl a data-btn name.
+async function perform(g) {
+	if (performing || !deviceReady()) { return; }
+	performing = true;
+	try {
+		if (g.shift) { await withShift(() => tapKey(g.ctl)); } else { await tapKey(g.ctl); }
+	} finally {
+		performing = false;
+	}
+}
+
+async function doubleTapFnc() {
+	await tapKey(FNC, 80);
+	await wait(120);
+	await tapKey(FNC, 80);
+}
+
+// Walk the device to a page of the manual, the way a player would.
+async function goTo(key) {
+	if (performing || !deviceReady()) { return; }
+	performing = true;
+	try {
+		const leaveSettings = async () => {
+			if (manual.layer === 'settings') { await tapKey(FNC); await wait(450); manual.layer = 'base'; }
+		};
+		const toModule = async (mod) => {
+			await leaveSettings();
+			if (manual.module !== mod) { await tapKey('T4'); await wait(450); }
+		};
+		if (key === 'plaits') {
+			await toModule('plaits');
+		} else if (key === 'plaitsSettings') {
+			await toModule('plaits');
+			await doubleTapFnc();
+			manual.layer = 'settings';
+		} else if (key === 'marblesT' || key === 'marblesX') {
+			await toModule('marbles');
+			const want = key === 'marblesX' ? 'X' : 't';
+			if (manual.side !== want) { await tapKey(want === 'X' ? 'T3' : 'T2'); await wait(300); }
+		} else if (key === 'marblesSettings') {
+			await toModule('marbles');
+			await doubleTapFnc();
+			manual.layer = 'settings';   // Wakes does not print this one: keep it ourselves
+		}
+	} finally {
+		performing = false;
+	}
+}
+
+function pageKey(n) {
+	const p = manual.pages.find((x) => x.n === n);
+	if (!p) { return null; }
+	for (const k of Object.keys(PAGE_RE)) {
+		if (PAGE_RE[k].test(p.title)) { return k; }
+	}
+	return null;
+}
+
+const CTL_NAME = { PLAY: 'PLAY', T1: 'T1', T2: 'T2', T3: 'T3', T4: 'T4', FFWD: 'FFWD', RWD: 'RWD',
+	'VOL+': 'VOL_UP', 'VOL−': 'VOL_DOWN', 'VOL-': 'VOL_DOWN', '••': FNC };
+
+function renderHotspots() {
+	const layer = $('manual-hot');
+	layer.textContent = '';
+	const p = manual.pages.find((x) => x.n === manual.cur);
+	if (!prefs.play || !p) { return; }
+	const pct = (v) => `${(v * 100).toFixed(3)}%`;
+	const add = (cls, b, label, onDown) => {
+		const h = document.createElement('button');
+		h.type = 'button';
+		h.className = `hs ${cls}`;
+		Object.assign(h.style, { left: pct(b[0]), top: pct(b[1]), width: pct(b[2] - b[0]), height: pct(b[3] - b[1]) });
+		h.title = label;
+		h.setAttribute('aria-label', label);
+		h.addEventListener('pointerdown', (e) => { e.preventDefault(); onDown(e, h); });
+		h.addEventListener('contextmenu', (e) => e.preventDefault());
+		layer.appendChild(h);
+		return h;
+	};
+	for (const which of ['base', 'shift']) {
+		const g = p[which];
+		if (!g) { continue; }
+		const shift = which === 'shift';
+		const cls = shift ? 'shift' : '';
+		const say = (ctl, name) => `${shift ? 'Hold •• and press' : 'Press'} ${keyName(ctl)}${name && name !== '-' ? ` (${name})` : ''}`;
+		const tap = (ctl) => () => perform({ shift, ctl });
+		g.keys.forEach((k, i) => add(cls, [k.x - 0.0095, k.y0, k.x + 0.0095, k.y1], say(`T${i + 1}`, k.label), tap(`T${i + 1}`)));
+		(g.top || []).forEach((t, i) => {
+			const ctl = i === 0 ? 'VOL_DOWN' : 'VOL_UP';
+			add(cls, t.box, say(ctl, t.label), tap(ctl));
+		});
+		if (g.rocker.up) { add(cls, g.rocker.up.box, say('FFWD', g.rocker.up.label), tap('FFWD')); }
+		if (g.rocker.down) { add(cls, g.rocker.down.box, say('RWD', g.rocker.down.label), tap('RWD')); }
+		if (g.edge.play) { add(cls, g.edge.play.box, say('PLAY', g.edge.play.label), tap('PLAY')); }
+		if (g.edge.fnc && !shift) { add(cls, g.edge.fnc.box, 'Tap ••', tap(FNC)); }
+		// Faders: press and drag on the manual's fader to move the device's.
+		g.faders.forEach((f, i) => {
+			const name = f.label ? ` (${f.label})` : '';
+			add(`${cls} fdr`, [f.x - 0.009, f.y0, f.x + 0.009, f.y1],
+				`${shift ? 'Hold •• and move' : 'Move'} fader ${i + 1}${name}`, (e, h) => {
+					if (!deviceReady()) { return; }
+					const r = h.getBoundingClientRect();
+					const at = (y) => setFader(i, 1 - Math.min(1, Math.max(0, (y - r.top) / r.height)));
+					const held = latched.has(FNC);
+					if (shift && !held) { press(FNC, true); }
+					h.setPointerCapture(e.pointerId);
+					at(e.clientY);
+					const move = (ev) => at(ev.clientY);
+					const done = () => {
+						h.removeEventListener('pointermove', move);
+						if (shift && !held) { setTimeout(() => press(FNC, false), 60); }
+					};
+					h.addEventListener('pointermove', move);
+					h.addEventListener('pointerup', done, { once: true });
+					h.addEventListener('pointercancel', done, { once: true });
+				});
+		});
+	}
+}
+
+// Gestures named in the reference tables ("•• + T2", "VOL− / VOL+", "T1–T4"...)
+function parseGesture(text) {
+	let t = text.replace(/\s+/g, ' ').trim()
+		.replace(/^(PLAITS|MARBLES|SETTINGS)( (t|X) page)? /i, '').replace(/, either page$/i, '');
+	let shift = false;
+	const m = /^••\s*\+\s*(.+)$/.exec(t);
+	if (m) { shift = true; t = m[1]; }
+	const ctls = [];
+	for (const part of t.split(/\s*\/\s*/)) {
+		const r = /^T([1-4])\s*[–-]\s*T([1-4])$/.exec(part);
+		if (r) {
+			for (let k = Number(r[1]); k <= Number(r[2]); k++) { ctls.push(`T${k}`); }
+		} else if (CTL_NAME[part] && !(shift && part === '••')) {
+			ctls.push(CTL_NAME[part]);
+		} else {
+			return null;
+		}
+	}
+	return ctls.length ? { shift, ctls } : null;
+}
+
+function decorateGestures(root) {
+	root.querySelectorAll('table tr td:first-child').forEach((td) => {
+		const g = parseGesture(td.textContent);
+		if (!g) { return; }
+		const row = document.createElement('span');
+		row.className = 'try-row';
+		for (const ctl of g.ctls) {
+			const b = document.createElement('button');
+			b.type = 'button';
+			b.className = 'try';
+			b.textContent = `▶ ${g.shift ? '•• + ' : ''}${keyName(ctl)}`;
+			b.title = `Play ${g.shift ? '•• + ' : ''}${keyName(ctl)} on the device`;
+			b.addEventListener('click', () => perform({ shift: g.shift, ctl }));
+			row.appendChild(b);
+		}
+		td.appendChild(row);
+	});
+}
+
+// ---- the session recorder: a run you can replay with wakes_headless ----
+const rec = { armed: false, on: false, events: [], resetreas: 0, end: 0, seen: [] };
+// Lines worth checking on a replay: where Wakes went and what it did with the keys.
+// (Wakes' key handlers print these in main.c; its boot-time dumps are left out.)
+const REC_EXPECT = /^(MODULE |MARBLES [tX] page|PAGE |SHIFT released|ENGINE |MODEL |SCALE |QUANTIZE |OUTPUT |ROUTE |RANGE |DIVISION |DIVERSITY |DEJA VU |TRIG |MIDI port enabled)/;
+function recLine(line) {
+	if (!rec.on) { return; }
+	const t = line.replace(/\s+$/, '');
+	if (REC_EXPECT.test(t) && !rec.seen.includes(t) && rec.seen.length < 12) { rec.seen.push(t); }
+}
+
+function recEvent(what, val) {
+	if (!rec.on || !dev || dev.state !== 'on' || !what) { return; }
+	rec.events.push([dev.nowMs(), what, String(val)]);
+	recStatus();
+}
+
+function recStart(resetreas) {
+	rec.on = true;
+	rec.armed = false;
+	rec.resetreas = resetreas;
+	const i = dev.inputs;
+	rec.events = [];
+	rec.seen = [];
+	const at0 = (w, v) => rec.events.push([0, w, String(v)]);
+	if (i.fnc) { at0('fnc', 1); }
+	for (const [n, bit] of Object.entries(BTN)) { if (i.buttons & (1 << bit)) { at0(REC_NAME[n], 1); } }
+	i.faders.forEach((v, k) => at0(`f${k + 1}`, v.toFixed(3)));
+	if (i.usb) { at0('usb', i.usb); }
+	if (i.battMv !== 3900) { at0('batt', i.battMv); }
+	$('rec-btn').textContent = 'Stop';
+	recStatus();
+}
+
+function recStop(why) {
+	if (!rec.on && !rec.armed) { return; }
+	const wasOn = rec.on;
+	rec.end = wasOn && dev && dev.state === 'on' ? dev.nowMs() : (rec.events.length ? rec.events[rec.events.length - 1][0] + 500 : 0);
+	rec.on = false;
+	rec.armed = false;
+	$('rec-btn').textContent = 'Record';
+	$('rec-status').classList.remove('live');
+	if (!wasOn) {
+		$('rec-status').textContent = 'Not recording.';
+		return;
+	}
+	// Faders: keep one point per 20 ms of each drag, and always its last.
+	const out = [];
+	const lastF = {};
+	for (const e of rec.events) {
+		if (/^f[1-4]$/.test(e[1]) && e[0] > 0) {
+			const prev = lastF[e[1]];
+			if (prev && e[0] - prev[0] < 20) { prev[0] = e[0]; prev[2] = e[2]; continue; }
+			const copy = [...e];
+			lastF[e[1]] = copy;
+			out.push(copy);
+			continue;
+		}
+		out.push(e);
+	}
+	const fmt = (t) => (t === 0 ? '0' : t.toFixed(2).replace(/\.?0+$/, ''));
+	const args = out.map((e) => `${fmt(e[0])}:${e[1]}=${e[2]}`);
+	const lines = [];
+	for (let k = 0; k < args.length; k += 5) { lines.push('  ' + args.slice(k, k + 5).join(' ')); }
+	const head = `build/emu/native/wakes_headless --ms ${Math.ceil(rec.end + 200)} ` +
+		`--resetreas 0x${(rec.resetreas >>> 0).toString(16)} --wav session.wav`;
+	const q = (t) => `'${t.replace(/'/g, `'\\''`)}'`;
+	const expect = rec.seen.map((t) => `  --expect ${q(t)}`);
+	$('rec-out').textContent = [head, ...expect, ...lines].join(' \\\n');
+	$('rec-out').hidden = false;
+	$('rec-copy').disabled = false;
+	$('rec-status').textContent = `${out.length} events over ${(rec.end / 1000).toFixed(1)} s` +
+		`${rec.seen.length ? `, ${rec.seen.length} console line${rec.seen.length === 1 ? '' : 's'} to check` : ''}${why ? ` (${why})` : ''}. ` +
+		'Run it from the repository after emulator/build.sh native; it exits non-zero if Wakes no longer prints them.';
+}
+
+function recStatus() {
+	const st = $('rec-status');
+	if (rec.on) {
+		st.classList.add('live');
+		st.textContent = `● Recording · ${rec.events.length} events · ${(dev.nowMs() / 1000).toFixed(1)} s`;
+	} else if (rec.armed) {
+		st.classList.add('live');
+		st.textContent = dev && dev.state === 'on'
+			? 'Armed: switch Wakes off and on again (hold ••); recording starts at the power-on.'
+			: 'Armed: switch Wakes on (hold ••); recording starts at the power-on.';
+	}
+}
+
+$('rec-btn').addEventListener('click', () => {
+	if (rec.on || rec.armed) {
+		recStop();
+	} else {
+		rec.armed = true;
+		$('rec-btn').textContent = 'Cancel';
+		$('rec-out').hidden = true;
+		recStatus();
+	}
+});
+$('rec-copy').addEventListener('click', async () => {
+	try { await navigator.clipboard.writeText($('rec-out').textContent); $('rec-copy').textContent = 'Copied'; }
+	catch { const r = document.createRange(); r.selectNodeContents($('rec-out')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); $('rec-copy').textContent = 'Selected'; }
+	setTimeout(() => { $('rec-copy').textContent = 'Copy script'; }, 1500);
+});
+setInterval(() => { if (rec.on) { recStatus(); } }, 500);
 
 function linkFor(href) {
 	if (/^[a-z]+:/i.test(href)) { return { href }; }
@@ -591,6 +1009,7 @@ async function openDoc(file, anchor) {
 		const r = await fetch(`manual/${file}`);
 		if (!r.ok) { throw new Error(`HTTP ${r.status}`); }
 		body.innerHTML = renderMarkdown(await r.text(), { link: linkFor });
+		if (prefs.play) { decorateGestures(body); }
 	} catch {
 		body.innerHTML = '';
 		const p = document.createElement('p');
@@ -626,6 +1045,17 @@ function setZoom(on) {
 $('manual-zoom').addEventListener('click', () => setZoom(!$('manual-view').classList.contains('zoomed')));
 $('manual-img').addEventListener('click', () => setZoom(!$('manual-view').classList.contains('zoomed')));
 
+$('manual-labels').checked = prefs.labels;
+$('manual-play').checked = prefs.play;
+$('manual-labels').addEventListener('change', (e) => { prefs.labels = e.target.checked; savePrefs(); renderDeviceLabels(); });
+$('manual-play').addEventListener('change', (e) => {
+	prefs.play = e.target.checked;
+	savePrefs();
+	renderHotspots();
+	if (manual.doc) { openDoc(manual.doc); }
+	playToast(prefs.play ? 'Clicks on the manual\'s drawings, its page tabs and ▶ in the reference now play the device.' : '');
+});
+
 const DEFAULT_DOCS = [
 	{ file: 'UI-PAGES.md', tab: 'Controls' }, { file: 'PLAITS-ENGINES.md', tab: 'Plaits engines' },
 	{ file: 'MARBLES-SETTINGS.md', tab: 'Marbles' }, { file: 'MIDI.md', tab: 'MIDI' },
@@ -652,7 +1082,11 @@ async function loadManual() {
 		b.innerHTML = '<span class="n"></span><span class="t"></span>';
 		b.querySelector('.n').textContent = String(p.n);
 		b.querySelector('.t').textContent = p.title.replace(/\s*\((left|right)\)\s*$/i, '');
-		b.addEventListener('click', () => showPage(p.n));
+		b.addEventListener('click', () => {
+			showPage(p.n);
+			const key = pageKey(p.n);
+			if (prefs.play && key) { goTo(key); }
+		});
 		tabs.appendChild(b);
 	}
 	if (manual.pages.length) {

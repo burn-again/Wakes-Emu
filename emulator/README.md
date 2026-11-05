@@ -34,7 +34,12 @@ TRIG), PLAY and `••` on the right edge, beside the ▲ and the two dots.
 | **Space** | PLAY |
 | **↑** / **↓** | the rocker: up (FFWD) / down (RWD) |
 | **←** / **→** | VOL− / VOL+ |
-| Alt + click | latch a key down, for combinations such as `••` + T2 |
+| right-click (or Alt + click) | hold a key down until you right-click it again, so the mouse is free for the next key or a fader: `••` + T2, `••` + a fader, T1 + T4 |
+| **Esc** | let go of every held key |
+
+On a touch screen, **Hold keys** makes every tap hold a key down until you tap it again.
+Every press lasts at least 45 ms: Wakes reads its keys every ~9 ms and wants two scans
+in agreement, so a click or a tap shorter than that would never register, as on the device.
 
 Faders take a drag, the scroll wheel, or the arrow keys once focused. The bench beside
 the device sets the USB-C cable (unplugged, a charger, or a computer: USB-MIDI and the
@@ -44,7 +49,28 @@ prints.
 
 The **Manual** panel holds the nine pages of `docs/Wakes - Manual.pdf`, and with *Follow
 Wakes* on it turns to the page for what Wakes is showing: Plaits, Marbles' t or X side,
-SETTINGS (it reads the `MODULE`, `MARBLES` and `PAGE` lines Wakes prints). The
+SETTINGS (it reads the `MODULE`, `MARBLES` and `PAGE` lines Wakes prints).
+
+- **Names on the device** (on unless you turn it off): the emulated SP-1 carries the
+  manual's name for every control on the page shown (FREQ / TIMB / MORP / HARM,
+  GLYP / ENG− / ENG+ / MRBL, the rocker's BRST / TRIG, what the side LEDs show), and the
+  SHFT names in blue while `••` is held.
+- **Clicks play the device** (off unless you turn it on): click a control in the manual's
+  drawing and the device gets that press (on the SHFT drawing, with `••` held; drag a
+  drawn fader to move the real one); click a page tab and the device is walked to that
+  page (T4 between the modules, T2/T3 between Marbles' sides, a double tap of `••` into
+  SETTINGS); and the gestures in the Reference tables (`•• + T2`, `VOL− / VOL+`, …) get
+  ▶ buttons that play them.
+
+Both come from the PDF itself: `tools/gen_manual.py` reads where each control's name sits
+in every drawing (`pdftotext -bbox`), so a new manual brings its own names and hotspots.
+
+The **Session recorder** turns what you play into a test. Press Record, switch Wakes on
+(it records from a power-on, so the run can be replayed from one), play, press Stop: it
+gives you a `wakes_headless` command with every key, fader, cable and MIDI event at its
+device time, plus `--expect` lines for what Wakes printed in reply (page changes, engine
+and model changes, routing, TRIG). Replayed after a firmware change, it exits 4 if Wakes
+no longer prints them. The
 **Reference** panel renders the docs beside it: the control map (`docs/UI-PAGES.md`), the
 Plaits engines, the Marbles settings, MIDI, the defaults, and the safety rules. Both are
 copied next to the page by `build.sh web` (the page images need poppler's `pdftoppm`). The WAKES drive panel is the eMMC volume: edit a `.cnfg`, save it, switch Wakes
@@ -61,7 +87,8 @@ build/emu/native/wakes_headless --ms 8000 --wav out.wav --drive out-drive \
 Events are `T:control=value` at T ms of device time: `fnc`, `play`, `t1`–`t4`, `volup`,
 `voldown`, `ffwd`, `rwd` (1/0), `f1`–`f4` (0–1), `usb` (0 unplugged, 1 charger,
 2 computer), `batt` (mV), `midi=90,3c,64` (hex bytes; needs `usb=2`). `--load DIR`
-puts files on the drive before boot. The run prints the console, writes what the I2S
+puts files on the drive before boot; `--expect TEXT` (repeatable) fails the run, with
+exit 4, unless the console printed TEXT. The run prints the console, writes what the I2S
 stream played to the WAV, and exits 3 if the device hit its watchdog, faulted, or
 `main()` returned.
 
@@ -130,7 +157,8 @@ emulator/
   src/emu_arch_*.c       thread switching: ucontext (native), Asyncify (wasm)
   native/wakes_headless.c  scripted runs, WAV and drive out
   web/                   index.html, app.js (the bench page), emu-core.js (device runtime), worklet.js,
-                         md.js (renders the reference docs); manual/ is generated
+                         md.js (renders the reference docs); manual/ is generated, with
+                         manual.json: page titles, and every drawing's names and hotspots
   tools/gen_config.py    emu_autoconf.h + app version from firmware/Kconfig, prj.conf, VERSION
   tools/gen_manual.py    manual pages (PNG), the PDF and the reference docs, into web/manual/
 ```
