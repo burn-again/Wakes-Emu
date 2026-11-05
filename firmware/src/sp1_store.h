@@ -171,6 +171,12 @@ enum sp1_store_save sp1_store_save_result(void);
 #define SP1_STORE_LOG_MAX      (8u * 1024u * 1024u)
 #define SP1_STORE_LOG_KEEP     5u       /* sessions kept, this one included (Adara) */
 
+#if defined(CONFIG_SP1_MIDIFILE)
+/* Main (through sp1_mf_main_tick): read the slot sp1_midifile.c is loading, from
+ * WAKES/MIDI/<slot>/ (the first .mid), into its buffer. Folders created every ON. */
+void sp1_store_midi_load(void);
+#endif
+
 /* The log file is open: the card is on for it. Cleared once it is closed and the card is off. */
 bool sp1_store_log_live(void);
 

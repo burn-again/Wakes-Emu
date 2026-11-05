@@ -293,7 +293,12 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 .files .row[aria-selected="true"] { background: var(--ink); color: var(--panel); }
 .files .row .sz { color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .files .row[aria-selected="true"] .sz { color: inherit; opacity: 0.7; }
-.files .dir { padding: 6px 12px 2px; font: 600 11px var(--font-mono); color: var(--ink-2); }
+.files .dir {
+	display: block; width: 100%; border: 0; background: none; text-align: left; cursor: pointer;
+	padding: 6px 12px 2px; font: 600 11px var(--font-mono); color: var(--ink-2);
+}
+.files .dir:hover { color: var(--ink); }
+.files .dir[aria-pressed="true"] { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .editor { display: flex; flex-direction: column; min-width: 0; }
 .editor .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .editor .path { font: 12px var(--font-mono); min-width: 0; overflow-wrap: anywhere; flex: 1; }
@@ -599,12 +604,12 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 						<button class="btn" type="button" id="file-copy" disabled>Copy</button>
 						<button class="btn" type="button" id="file-save" disabled>Save to drive</button>
 					</div>
-					<textarea id="file-editor" spellcheck="false" aria-label="File contents" placeholder="Pick a file. Edit a .cnfg, save it, then switch Wakes off and on: it reads WAKES/CNFG at every ON."></textarea>
+					<textarea id="file-editor" spellcheck="false" aria-label="File contents" placeholder="Pick a file. Edit a .cnfg, save it, then switch Wakes off and on: it reads WAKES/CNFG at every ON. Click a folder name to add files to it: a .mid in WAKES/MIDI/1 to 4 plays with rocker down + T1 to T4."></textarea>
 				</div>
 			</div>
 			<div class="drive-foot">
 				<p class="note" id="drive-note">Kept in this browser between visits.</p>
-				<label class="btn" for="upload">Add files…</label>
+				<label class="btn" for="upload" id="upload-label">Add files…</label>
 				<input type="file" id="upload" multiple hidden>
 				<button class="btn danger" type="button" id="erase">Erase drive</button>
 			</div>

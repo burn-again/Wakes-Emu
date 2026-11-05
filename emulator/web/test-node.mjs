@@ -122,6 +122,54 @@ if (/ drum=\d+/.test(log)) {
 	console.log('skip  drums: this build has no CONFIG_SP1_DRUM');
 }
 
+// MIDI files (CONFIG_SP1_MIDIFILE, docs/MIDIFILE.md): rocker down + T1-T4 picks
+// WAKES/MIDI/1 .. 4. A file made here (format 1: a tempo track, then a C major chord and
+// three notes over it), a non-MIDI file in slot 2, then PLAY.
+dev.snapshotDrive();
+if (dev.drive.has('/WAKES/MIDI/1')) {
+	const vlq = (n) => { const b = [n & 0x7f]; while ((n >>>= 7)) { b.unshift((n & 0x7f) | 0x80); } return b; };
+	const be = (n, k) => Array.from({ length: k }, (_, i) => (n >>> (8 * (k - 1 - i))) & 255);
+	const track = (evs) => {
+		let at = 0;
+		const d = evs.flatMap(([t, ...m]) => { const r = [...vlq(t - at), ...m]; at = t; return r; });
+		return [0x4d, 0x54, 0x72, 0x6b, ...be(d.length, 4), ...d];
+	};
+	const q = 96;
+	const notes = [[0, 60, 4], [0, 64, 4], [0, 67, 4], [2, 72, 1], [3, 74, 1], [4, 76, 2]];
+	const evs = notes.flatMap(([b, n, len]) => [[b * q, 0x90, n, 100], [(b + len) * q, 0x80, n, 0]])
+		.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+	const smf = new Uint8Array([0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 2, ...be(q, 2),
+		...track([[0, 0xff, 0x51, 3, 0x07, 0xa1, 0x20], [0, 0xff, 0x2f, 0]]),
+		...track([...evs, [6 * q, 0xff, 0x2f, 0]])]);
+	dev.writeFile('/WAKES/MIDI/1/test.mid', smf);
+	dev.writeFile('/WAKES/MIDI/2/notes.mid', new TextEncoder().encode('not a MIDI file\n'));
+	const rocker = (b, t) => {
+		step(t); dev.setButton(BTN.RWD, true); tap(b, t + 100); step(t + 300); dev.setButton(BTN.RWD, false);
+	};
+	dev.setFnc(true);
+	await dev.service();
+	step(2000);
+	dev.setFnc(false);
+	step(2500);
+	rocker(BTN.T2, 2600);
+	rocker(BTN.T1, 3200);
+	step(3800);
+	const third = log.slice(log.lastIndexOf('=== Wakes v0.9.0 ==='));
+	check(/MIDIFILE 2: notes\.mid -- not a MIDI file/.test(third), 'MIDI files: a file that is not MIDI is refused, by name');
+	check(/MIDIFILE 1: test\.mid \(\d+ B\) -- format 1, 2 tracks, 6 notes 60\.\.76, up to 4 at once, 6\.00 beats/.test(third),
+		'MIDI files: rocker down + T1 loads WAKES/MIDI/1 and reads it right');
+	peak = 0;
+	tap(BTN.PLAY, 4000);
+	step(8000);
+	const played = log.slice(log.lastIndexOf('=== Wakes v0.9.0 ==='));
+	check(/MIDI active/.test(played) && peak > 0.05, 'MIDI files: PLAY plays it through the MIDI note path');
+	rocker(BTN.T1, 8200);
+	step(8800);
+	check(/MIDIFILE off/.test(log.slice(log.lastIndexOf('=== Wakes v0.9.0 ==='))), 'MIDI files: the same gesture again turns it off');
+} else {
+	console.log('skip  MIDI files: this build has no CONFIG_SP1_MIDIFILE');
+}
+
 const secs = (performance.now() - t0) / 1000;
 console.log(`\n${frames} frames of audio (${(frames / 48000).toFixed(1)} s of device time) ` +
 	`in ${secs.toFixed(2)} s wall (${(frames / 48000 / secs).toFixed(1)}x real time)`);

@@ -21,9 +21,10 @@ OVR=$OUT/ovr
 WHAT=${1:-all}
 WASM_OUT=${EMU_WASM_OUT:-$HERE/web/wakes.wasm}     # tools/calibrate.sh builds a second one
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}
-# Kconfig overrides on top of prj.conf. Unset: the emulator's own, the experimental drum
-# hits (docs/DRUMS.md) on. EMU_KCONFIG= (empty) builds exactly what prj.conf builds.
-EMU_KCONFIG=${EMU_KCONFIG-SP1_DRUM=y}
+# Kconfig overrides on top of prj.conf. Unset: the emulator's own, the experiments on --
+# drum hits (docs/DRUMS.md) and MIDI files (docs/MIDIFILE.md). EMU_KCONFIG= (empty) builds
+# exactly what prj.conf builds.
+EMU_KCONFIG=${EMU_KCONFIG-SP1_DRUM=y SP1_MIDIFILE=y}
 
 mkdir -p "$GEN" "$OVR"
 
@@ -60,7 +61,7 @@ dsp_sources() {
 WAKES_C="main.c sp1_led.c sp1_power.c sp1_batt.c sp1_standby.c sp1_console.c sp1_logbuf.c
 	sp1_logring.c sp1_threads.c sp1_usbd.c sp1_controls.c sp1_display.c sp1_calib.c
 	sp1_audio.c sp1_meter.c sp1_playrow.c sp1_plaits_ui.c sp1_store.c sp1_cnfg.c
-	sp1_marbles_ui.c sp1_prst.c sp1_scales.c"
+	sp1_marbles_ui.c sp1_prst.c sp1_scales.c sp1_midifile.c"
 WAKES_CXX="sp1_synth.cc sp1_marbles.cc sp1_midi.cc sp1_zero.cc"
 EMU_C="emu_kernel.c emu_board.c emu_fs.c emu_emmc.c emu_uac.c emu_api.c"
 

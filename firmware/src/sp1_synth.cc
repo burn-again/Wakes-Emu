@@ -12,6 +12,9 @@
 #include "sp1_gtlt.h"
 #if defined(CONFIG_SP1_MIDI)
 #include "sp1_midi.h"
+#if defined(CONFIG_SP1_MIDIFILE)
+#include "sp1_midifile.h"
+#endif
 #endif
 
 #include <atomic>
@@ -377,6 +380,12 @@ __attribute__((noinline)) void AddRoute(Routing* r, int source, int dest, float 
   ++r->count;
 }
 
+#if defined(CONFIG_SP1_MIDIFILE)
+void MidiFileEmit(void*, const uint8_t msg[3], uint8_t len) {
+  sp1_midi_audio_file(msg, len);
+}
+#endif
+
 Routing ResolveRouting(const sp1_synth_params& c) {
   Routing r = {};
   for (int t = 0; t < 3; ++t) {
@@ -552,6 +561,11 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
   // this block's clock ticks and transport are Marbles' clock (M5b). ----
   const uint32_t prof_mi0 = Now();
   float moff[SP1_MIDI_AUDIO_DESTS];
+#if defined(CONFIG_SP1_MIDIFILE)
+  // A MIDI file that is READY keeps the MIDI path running (its notes come per Plaits block,
+  // below); a released one sends its note-offs into this block.
+  sp1_midi_audio_file_live(sp1_mf_audio_live(MidiFileEmit, nullptr));
+#endif
   const bool midi = sp1_midi_audio_begin(midi_clock ? midi_clock() : 0u, frames / plaits::kBlockSize, c.engine_centre,
                                          moff);
   {
@@ -658,6 +672,13 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     // pitch. A note-on strikes TRIG here, joining every other TRIG source (RWD, the burst, a
     // routed t gate) through the same pulse and re-strike logic below. ----
     sp1_midi_frame mf = { false, false, 0.0f, 0.0f };
+#if defined(CONFIG_SP1_MIDIFILE)
+    // The MIDI file (sp1_midifile.h): its position is Marbles' master ramp, so it follows
+    // PLAY, RATE and the t range. Its notes join USB's for this Plaits block.
+    if (midi) {
+      sp1_mf_audio_block(mrb, mrb ? mrb_ramp[j] : 0.0f, MidiFileEmit, nullptr);
+    }
+#endif
     if (midi) {
       sp1_midi_audio_block(j, &mf);
       if (mf.trig) {

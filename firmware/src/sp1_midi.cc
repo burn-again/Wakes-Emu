@@ -62,6 +62,15 @@ struct Event {
 };
 const uint32_t kQueue = 128;                 // 1 KB; a 64-byte USB packet is 16 events
 Event queue[kQueue];
+#if defined(CONFIG_SP1_MIDIFILE)
+// The MIDI file player's notes (sp1_midifile.h), audio thread only: filled during a Plaits
+// block, drained by sp1_midi_audio_block under the same minimum-gate rule as USB's.
+const uint32_t kFileQueue = 64;
+Event file_q[kFileQueue];
+uint32_t file_n, file_next;
+bool file_live;
+volatile uint32_t file_dropped;
+#endif
 volatile uint32_t q_head;                    // producer
 volatile uint32_t q_tail;                    // consumer
 volatile uint32_t st_received, st_dropped;
@@ -1476,8 +1485,36 @@ extern "C" bool sp1_midi_audio_begin(uint32_t cycles, uint32_t blocks, uint8_t e
 
   // Nothing queued, nothing held or sounding, nothing gliding home: the synth skips the
   // per-Plaits-block calls altogether (issue #21: MIDI costs nothing until it is used).
+#if defined(CONFIG_SP1_MIDIFILE)
+  if (file_live || file_next < file_n) {
+    return true;
+  }
+#endif
   return block_n > 0u || active || !settled;
 }
+
+#if defined(CONFIG_SP1_MIDIFILE)
+extern "C" void sp1_midi_audio_file_live(bool live) {
+  file_live = live;
+}
+
+extern "C" void sp1_midi_audio_file(const uint8_t msg[3], uint8_t len) {
+  if (file_next == file_n) {
+    file_n = file_next = 0;
+  }
+  if (file_n >= kFileQueue) {
+    file_dropped = file_dropped + 1u;
+    return;
+  }
+  Event& e = file_q[file_n++];
+  const uint8_t ch = g_cfg.channel == SP1_MIDI_OMNI ? 0u : static_cast<uint8_t>(g_cfg.channel);
+  e.msg[0] = static_cast<uint8_t>((msg[0] & 0xF0u) | ch);
+  e.msg[1] = msg[1];
+  e.msg[2] = len > 2u ? msg[2] : 0u;
+  e.len = len;
+  e.cycles = 0u;
+}
+#endif
 
 extern "C" void sp1_midi_audio_block(uint32_t j, sp1_midi_frame* f) {
   // ---- the minimum gate: one Plaits block (0.5 ms at 24 samples) ----
@@ -1490,6 +1527,11 @@ extern "C" void sp1_midi_audio_block(uint32_t j, sp1_midi_frame* f) {
   while (block_next < block_n && block_at[block_next] <= j && !trig_pending) {
     Process(block_ev[block_next++]);
   }
+#if defined(CONFIG_SP1_MIDIFILE)
+  while (file_next < file_n && !trig_pending) {
+    Process(file_q[file_next++]);
+  }
+#endif
   // Every MIDI block costs the same from here on, whether anything moves or not.
   Refresh();
   f->note = note_now - 60.0f + (static_cast<float>(bend) - 8192.0f) * bend_scale;

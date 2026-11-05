@@ -376,6 +376,10 @@ rings include **none**, so any output can be silenced.
 With the experimental `CONFIG_SP1_DRUM` (off in device builds, on in the emulator) the t ring
 continues HARMONICS → **KICK → SNARE → HAT** before it wraps: `docs/DRUMS.md`.
 
+With the experimental `CONFIG_SP1_MIDIFILE` (also off on the device, on in the emulator), **rocker
+down + T1–T4** picks a MIDI file from `WAKES/MIDI/1` … `4`, and MARBLES' rocker-down range step
+moves to its release: `docs/MIDIFILE.md`.
+
 Destination glyphs — **note the identical glyphs between TRIG and V/Oct, it is intentional**
 
 | destination | on t1–t3 | on X1–X3 / Y |

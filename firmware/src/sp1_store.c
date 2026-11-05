@@ -15,6 +15,9 @@
 #include "sp1_console.h"
 #include "sp1_cnfg.h"
 #include "sp1_logbuf.h"
+#if defined(CONFIG_SP1_MIDIFILE)
+#include "sp1_midifile.h"
+#endif
 #include "sp1_engines_gen.h"
 #if defined(CONFIG_SP1_PLAITS)
 #include "sp1_audio_gen.h"
@@ -74,6 +77,7 @@ static uint32_t r_data;
 #define JOB_HOST BIT(1)
 #define JOB_SAVE BIT(2)
 #define JOB_LOGEND BIT(3)
+#define JOB_MIDI BIT(4)          /* CONFIG_SP1_MIDIFILE: read the selected slot's file */
 static atomic_t pending;
 
 /* What main's storage_gate() reads (sp1_store.h). */
@@ -1640,6 +1644,110 @@ static void job_save(void)
 
 #endif /* CONFIG_SP1_PLAITS */
 
+#if defined(CONFIG_SP1_MIDIFILE)
+/* ---------------------------------------------------------------- MIDI files
+ * WAKES/MIDI/1 .. 4, one folder per slot, any name: the first `.mid` in alphabetical order
+ * (as PRST's folders). Read when the slot is picked (rocker down + T1-T4), into the
+ * player's buffer -- in this thread, below audio, so it costs the audio block nothing. */
+#define DIR_MIDI DIR_WAKES "/MIDI"
+
+static bool is_mid(const char *n)
+{
+	const size_t len = strlen(n);
+	return (len >= 4u && name_cmp(n + len - 4u, ".mid") == 0) ||
+	       (len >= 5u && name_cmp(n + len - 5u, ".midi") == 0);
+}
+
+/* Every ON, after the config files: the four folders, so a computer shows where files go.
+ * Only what is missing is created; a FILE in a folder's place is left alone (ensure_dir). */
+static void midi_dirs(void)
+{
+	static char path[PATH_MAX_];
+	if (ensure_dir(DIR_WAKES) != 0 || ensure_dir(DIR_MIDI) != 0) {
+		return;
+	}
+	for (int i = 0; i < SP1_MF_SLOTS && !stop; i++) {
+		snprintk(path, sizeof(path), DIR_MIDI "/%d", i + 1);
+		(void)ensure_dir(path);
+	}
+}
+
+static void job_midi(void)
+{
+	static struct fs_dirent ent;
+	static char path[PATH_MAX_];
+	static char best[MAX_FILE_NAME + 1];
+	int slot;
+	if (!sp1_mf_loading(&slot)) {
+		return;
+	}
+	const uint32_t t0 = k_uptime_get_32();
+	int rc = 0;
+	const bool mount_here = !log_live;
+	if (mount_here) {
+		claim_for_wakes();
+		struct sp1_emmc_ident id;
+		rc = sp1_emmc_init(&id) ? 0 : -EIO;
+		view_base = 0;
+		view_count = sp1_emmc_sectors();
+		if (rc == 0 && !stop) {
+			rc = mount_vol();
+		}
+	}
+	best[0] = '\0';
+	uint32_t best_size = 0u;
+	if (rc == 0 && !stop) {
+		snprintk(path, sizeof(path), DIR_MIDI "/%d", slot + 1);
+		struct fs_dir_t dir;
+		fs_dir_t_init(&dir);
+		rc = fs_opendir(&dir, path);
+		if (rc == -ENOENT) {
+			rc = 0;                                /* no folder: an empty slot */
+		} else if (rc == 0) {
+			for (;;) {
+				rc = fs_readdir(&dir, &ent);
+				if (rc != 0 || ent.name[0] == '\0' || stop) {
+					break;
+				}
+				if (ent.type == FS_DIR_ENTRY_FILE && is_mid(ent.name) &&
+				    (best[0] == '\0' || name_cmp(ent.name, best) < 0)) {
+					strncpy(best, ent.name, MAX_FILE_NAME);
+					best[MAX_FILE_NAME] = '\0';
+					best_size = (uint32_t)ent.size;
+				}
+			}
+			(void)fs_closedir(&dir);
+		}
+	}
+	size_t got = 0u;
+	if (rc == 0 && !stop && best[0] != '\0') {
+		size_t cap;
+		uint8_t *const buf = sp1_mf_buffer(&cap);
+		if (best_size > cap) {
+			rc = -EFBIG;
+			got = best_size;
+		} else {
+			snprintk(path, sizeof(path), DIR_MIDI "/%d/%.255s", slot + 1, best);
+			rc = read_file(path, buf, cap, &got);
+		}
+	}
+	if (stop && rc == 0) {
+		rc = -ECANCELED;
+	}
+	LINE("STORE MIDI %d: %s%s (%d) in %u ms\n", slot + 1, best[0] ? best : "no .mid",
+	     rc == 0 ? "" : " -- FAILED", rc, (unsigned)(k_uptime_get_32() - t0));
+	sp1_mf_loaded(best, rc == 0 ? got : (rc == -EFBIG ? got : 0u), rc);
+	if (mount_here) {
+		unmount_vol();
+		if (!stop) {
+			sp1_emmc_power_down();
+		}
+		atomic_set(&owner, OWN_NONE);
+	}
+}
+
+#endif /* CONFIG_SP1_MIDIFILE */
+
 /* ---------------------------------------------------------------- the jobs */
 
 /* Take the card for Wakes. Under the lock, so a host transfer in flight finishes first
@@ -1734,6 +1842,11 @@ static void job_on_enter(void)
 		if (rc == 0 && !stop) {
 			cnfg_create_missing();
 		}
+#if defined(CONFIG_SP1_MIDIFILE)
+		if (rc == 0 && !stop) {
+			midi_dirs();
+		}
+#endif
 #if defined(CONFIG_SP1_STORAGE_TEST)
 		if (rc == 0 && !stop) {
 			file_test();
@@ -1858,6 +1971,11 @@ static void store_thread(void *a, void *b, void *c)
 			} else if (jobs & JOB_LOGEND) {
 				atomic_and(&pending, ~JOB_LOGEND);
 				job_log_end();
+#if defined(CONFIG_SP1_MIDIFILE)
+			} else if (jobs & JOB_MIDI) {
+				atomic_and(&pending, ~JOB_MIDI);
+				job_midi();
+#endif
 			} else if (jobs & JOB_HOST) {
 				atomic_and(&pending, ~JOB_HOST);
 #if defined(CONFIG_SP1_DRIVE)
@@ -2015,6 +2133,14 @@ bool sp1_store_log_live(void)
 {
 	return atomic_get(&log_live_a) != 0;
 }
+
+#if defined(CONFIG_SP1_MIDIFILE)
+void sp1_store_midi_load(void)
+{
+	atomic_or(&pending, JOB_MIDI);
+	k_sem_give(&go);
+}
+#endif
 
 void sp1_store_log_end(void)
 {

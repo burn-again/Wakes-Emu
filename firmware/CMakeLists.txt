@@ -477,6 +477,8 @@ if(CONFIG_SP1_PLAITS)
 	if(CONFIG_SP1_MIDI)
 		# The MIDI core runs in the audio thread: same library, same -O2, as the synth.
 		zephyr_library_sources(src/sp1_midi.cc)
+		# Experimental: MIDI files from the drive (docs/MIDIFILE.md).
+		target_sources_ifdef(CONFIG_SP1_MIDIFILE app PRIVATE src/sp1_midifile.c)
 
 		# feldd's USB-MIDI 1.0 class, vendored unmodified in third_party/feldd. Our
 		# changes are a patch applied to a copy in the build directory, STRICTLY: if

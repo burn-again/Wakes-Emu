@@ -457,6 +457,7 @@ $('copy-log').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ the WAKES drive
 let selected = null;
+let uploadDir = null;        // the folder "Add files…" writes into (a folder row clicked)
 let dirty = false;
 const dec = new TextDecoder();
 
@@ -486,10 +487,23 @@ function loadSavedDrive() {
 
 function fmtSize(n) { return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`; }
 
+function uploadTarget() {
+	return uploadDir || (selected ? selected.slice(0, selected.lastIndexOf('/')) : '/WAKES/CNFG');
+}
+
 function renderFiles() {
 	if (!dev) { return; }
 	const box = $('files');
-	const entries = [...dev.drive.entries()].filter(([, f]) => !f.dir).sort((a, b) => a[0].localeCompare(b[0]));
+	const all = [...dev.drive.entries()];
+	const entries = all.filter(([, f]) => !f.dir).sort((a, b) => a[0].localeCompare(b[0]));
+	// Empty folders get a row too (WAKES/MIDI/1 .. 4 are made empty, for files to go in).
+	for (const [p, f] of all) {
+		if (f.dir && !all.some(([q]) => q.startsWith(p + '/'))) {
+			entries.push([p, f]);
+		}
+	}
+	entries.sort((a, b) => (a[1].dir ? a[0] + '/' : a[0]).localeCompare(b[1].dir ? b[0] + '/' : b[0]));
+	const target = uploadTarget();
 	box.textContent = '';
 	if (!entries.length) {
 		const e = document.createElement('div');
@@ -498,13 +512,26 @@ function renderFiles() {
 		box.appendChild(e);
 	}
 	let lastDir = null;
+	const dirRow = (dir, empty) => {
+		const d = document.createElement('button');
+		d.type = 'button';
+		d.className = 'dir';
+		d.dataset.dir = dir;
+		d.setAttribute('aria-pressed', dir === target ? 'true' : 'false');
+		d.title = 'Add files here';
+		d.textContent = dir.replace(/^\//, '') + '/' + (empty ? '  (empty)' : '');
+		d.addEventListener('click', () => { uploadDir = dir; renderFiles(); });
+		box.appendChild(d);
+	};
 	for (const [p, f] of entries) {
+		if (f.dir) {
+			dirRow(p, true);
+			lastDir = p;
+			continue;
+		}
 		const dir = p.slice(0, p.lastIndexOf('/')) || '/';
 		if (dir !== lastDir) {
-			const d = document.createElement('div');
-			d.className = 'dir';
-			d.textContent = dir.replace(/^\//, '') + '/';
-			box.appendChild(d);
+			dirRow(dir, false);
 			lastDir = dir;
 		}
 		const r = document.createElement('button');
@@ -518,8 +545,10 @@ function renderFiles() {
 		r.addEventListener('click', () => openFile(p));
 		box.appendChild(r);
 	}
-	const total = entries.reduce((s, [, f]) => s + f.data.length, 0);
-	$('drive-sub').textContent = `${entries.length} files · ${fmtSize(total)}`;
+	const files = entries.filter(([, f]) => !f.dir);
+	const total = files.reduce((s, [, f]) => s + f.data.length, 0);
+	$('drive-sub').textContent = `${files.length} files · ${fmtSize(total)}`;
+	$('upload-label').textContent = `Add files to ${target.replace(/^\//, '')}/…`;
 	if (selected && !dirty && dev.drive.has(selected)) { showFile(selected); }
 }
 
@@ -540,6 +569,7 @@ function showFile(p) {
 
 function openFile(p) {
 	selected = p;
+	uploadDir = null;
 	dirty = false;
 	showFile(p);
 	renderFiles();
@@ -567,7 +597,7 @@ $('file-copy').addEventListener('click', async () => {
 	setTimeout(() => { $('file-copy').textContent = 'Copy'; }, 1500);
 });
 $('upload').addEventListener('change', async (e) => {
-	const folder = selected ? selected.slice(0, selected.lastIndexOf('/')) : '/WAKES/CNFG';
+	const folder = uploadTarget();
 	for (const file of e.target.files) {
 		const data = new Uint8Array(await file.arrayBuffer());
 		dev.writeFile(`${folder}/${file.name}`, data);
@@ -590,6 +620,7 @@ $('erase').addEventListener('click', () => {
 	b.textContent = 'Erase drive';
 	dev.eraseDrive();
 	selected = null;
+	uploadDir = null;
 	$('file-editor').value = '';
 	$('file-path').textContent = 'No file selected';
 	hostNote('drive: erased (Wakes writes fresh CNFG defaults at the next ON)');

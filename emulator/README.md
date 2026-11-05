@@ -153,10 +153,20 @@ note on the rest. For a mono drum machine, pick the **drums** t model (T1 twice)
 t1 → KICK, t2 → HAT, t3 → SNARE. `docs/DRUMS.md` covers the rules, the recipes and the CPU
 cost. It is also the **Drums** tab in the page's reference.
 
-`EMU_KCONFIG` sets the Kconfig overrides. Unset, it is `SP1_DRUM=y`. Set it empty
+## Experimental: MIDI files
+
+Also built on here (`CONFIG_SP1_MIDIFILE`, off on the device): a Standard MIDI File in
+`WAKES/MIDI/1` … `4` plays into the Plaits voice through the MIDI note path, with Marbles'
+clock as its position. In the page: switch on once, click **`WAKES/MIDI/1/`** in the drive
+panel, **Add files to WAKES/MIDI/1/…**, then hold the rocker down and press **T1**, and
+**PLAY**. One voice, so `midi.cnfg`'s `note_priority` decides what a chord becomes: `high`
+for the melody, `low` for the bass. `docs/MIDIFILE.md` (the **MIDI files** tab) has the
+rules, the polyphony measurements and the limits.
+
+`EMU_KCONFIG` sets the Kconfig overrides. Unset, it is `SP1_DRUM=y SP1_MIDIFILE=y`. Set it empty
 (`EMU_KCONFIG= sh emulator/build.sh`) to build exactly what `prj.conf` builds, or to
 another list (`EMU_KCONFIG="SP1_DRUM=y SP1_PLAITS_BLOCK=12"`) to combine options.
-`test-node.mjs` runs its drum checks only when the build has them.
+`test-node.mjs` runs its drum and MIDI file checks only when the build has them.
 
 ## Test your own change
 
@@ -173,7 +183,7 @@ and publishes the page to GitHub Pages (Settings → Pages → Source: GitHub Ac
 
 | | In the emulator |
 |---|---|
-| Wakes' code | **Real**: every file in `firmware/src` but two, compiled unchanged; the generated headers come from the same `tools/gen_*.py`, the Plaits overrides from `tools/host-tests/mkovr.py`, the `CONFIG_` values from `firmware/Kconfig` + `prj.conf`, plus `EMU_KCONFIG` (default `SP1_DRUM=y`) |
+| Wakes' code | **Real**: every file in `firmware/src` but two, compiled unchanged; the generated headers come from the same `tools/gen_*.py`, the Plaits overrides from `tools/host-tests/mkovr.py`, the `CONFIG_` values from `firmware/Kconfig` + `prj.conf`, plus `EMU_KCONFIG` (default `SP1_DRUM=y SP1_MIDIFILE=y`) |
 | Threads | Zephyr's rule (highest priority ready runs; a wake that outranks preempts), as coroutines on **virtual time**: audio, main and the storage thread interleave as on the device |
 | Faders, buttons | The ladder voltages Wakes' tables were measured from, including the rail sag a pressed ladder puts on the faders; Wakes' own decode, debounce and sag rejection run on them |
 | `••`, charger, USB VBUS | GPIO and POWER registers; `••` and VBUS wake the device from SYSTEM_OFF |

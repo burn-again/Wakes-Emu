@@ -255,6 +255,25 @@ config SP1_DRUM
 	  as `none`. See docs/DRUMS.md.
 	  Off: the firmware is exactly as without this option. The emulator builds it on.
 
+config SP1_MIDIFILE
+	bool "Experimental: play MIDI files from the drive"
+	default n
+	depends on SP1_MIDI && SP1_STORAGE
+	help
+	  Rocker down + T1-T4 picks WAKES/MIDI/1 .. 4 (the first .mid in the folder, as
+	  PRST picks its .prst); the same again turns it off. The file plays into the Plaits
+	  voice through the MIDI note path (midi.cnfg's note priority, legato and glide),
+	  with Marbles' clock as its position: PLAY starts it from the top, RATE and the t
+	  range set the tempo, and it loops. One voice, so a chord sounds as one note. With
+	  this option, RWD's t-range step on MARBLES moves to the release, so the gesture
+	  does not also change the range. See docs/MIDIFILE.md. The emulator builds it on.
+
+config SP1_MIDIFILE_MAX_KB
+	int "MIDI files: largest file played, KB of RAM"
+	default 16
+	range 4 64
+	depends on SP1_MIDIFILE
+
 config SP1_STRING_VOICES
 	int "String engine: number of strings (Plaits kNumStrings)"
 	range 1 3

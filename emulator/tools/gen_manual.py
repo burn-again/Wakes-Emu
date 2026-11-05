@@ -25,6 +25,7 @@ DOCS = [
     ('MARBLES-SETTINGS.md', 'Marbles'),
     ('MIDI.md', 'MIDI'),
     ('DRUMS.md', 'Drums'),
+    ('MIDIFILE.md', 'MIDI files'),
     ('DEFAULTS.md', 'Defaults'),
     ('SAFETY.md', 'Safety'),
 ]

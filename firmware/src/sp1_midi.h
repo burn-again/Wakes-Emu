@@ -255,6 +255,16 @@ void sp1_midi_audio_block(uint32_t j, struct sp1_midi_frame *out);
  * gate has closed after the last key (or at once when the engine bypasses its LPG). */
 void sp1_midi_audio_lpg(float gain, bool bypassed);
 
+#if defined(CONFIG_SP1_MIDIFILE)
+/* A second source of notes: the MIDI file player (sp1_midifile.h), audio thread.
+ * sp1_midi_audio_file_live() before sp1_midi_audio_begin (true: run the Plaits blocks even
+ * with nothing from USB); sp1_midi_audio_file() during Plaits block j, before
+ * sp1_midi_audio_block(j). The channel is rewritten to the script's, so every channel of the
+ * file plays the voice. Processed with the same one-strike-per-block rule as USB. */
+void sp1_midi_audio_file_live(bool live);
+void sp1_midi_audio_file(const uint8_t msg[3], uint8_t len);
+#endif
+
 /* MIDI clock for this audio block (M5b, above), after sp1_midi_audio_begin and before
  * Marbles renders. Always valid, whatever sp1_midi_audio_begin returned. */
 #define SP1_MIDI_TP_NONE     0

@@ -95,6 +95,9 @@
 #include "sp1_prst.h"            /* M6 (#50): the ROTC defaults main.c owns */
 #include "sp1_release_guard.h"
 #include "sp1_midi.h"
+#if defined(CONFIG_SP1_MIDIFILE)
+#include "sp1_midifile.h"
+#endif
 #include "sp1_cnfg.h"           /* the config types: midi.cnfg, audio.cnfg (#52) */
 #endif
 #if defined(CONFIG_SP1_USB_AUDIO)
@@ -845,6 +848,42 @@ static void marbles_y_dest_button(void)
 	voct_took_over(r.dest[3]);
 }
 
+#if defined(CONFIG_SP1_MIDIFILE)
+/* ================= MIDI files: rocker down + T1-T4 (docs/MIDIFILE.md) =================
+ * Picks WAKES/MIDI/<n>; the slot that is playing again turns it off. On either module.
+ * The T button's own action does not happen (the gesture takes the tick), and on MARBLES
+ * RWD's t-range step waits for the release and is skipped if a T came first (`rwd_combo`)
+ * -- the release rule "••" + T already follows. On PLAITS, RWD's TRIG stays on the press:
+ * it is played, so the gesture costs one strike. */
+static bool rwd_combo;
+
+static bool midifile_gesture(bool fnc)
+{
+	if (fnc || !sp1_button_held(SP1_BTN_RWD)) {
+		return false;
+	}
+	for (int t = 0; t < SP1_MF_SLOTS; t++) {
+		if (!sp1_button_pressed((enum sp1_button)(SP1_BTN_T1 + t))) {
+			continue;
+		}
+		rwd_combo = true;
+		if (sp1_store_volume() != SP1_STORE_VOL_OK) {
+			printk("MIDIFILE: no drive (the eMMC has no FAT volume)\n");
+			return true;
+		}
+		sp1_mf_select(t);
+		uint8_t lv[4] = { 0u, 0u, 0u, 0u };
+		if (sp1_mf_slot() >= 0) {
+			lv[t] = SP1_ENGINE_LED_FULL;
+			printk("MIDIFILE %d: reading WAKES/MIDI/%d\n", t + 1, t + 1);
+		}
+		sp1_display_engine(lv);
+		return true;
+	}
+	return false;
+}
+#endif
+
 static void marbles_buttons(bool fnc, uint32_t dt)
 {
 	uint8_t lv[4];
@@ -911,8 +950,14 @@ static void marbles_buttons(bool fnc, uint32_t dt)
 	}
 
 	/* [B] on RWD / FFWD: clock range, no wrap (Adara). Every Marbles page. */
+#if defined(CONFIG_SP1_MIDIFILE)
+	/* RWD on its release, unless it was the MIDI file gesture (midifile_gesture). */
+	const int rstep = sp1_button_pressed(SP1_BTN_FFWD) ? 1
+			: (sp1_button_released(SP1_BTN_RWD) && !rwd_combo) ? -1 : 0;
+#else
 	const int rstep = sp1_button_pressed(SP1_BTN_FFWD) ? 1
 			: sp1_button_pressed(SP1_BTN_RWD) ? -1 : 0;
+#endif
 	if (rstep != 0) {
 		if (sp1_mui_t_range_step(rstep)) {
 			static const uint8_t F = SP1_ENGINE_LED_FULL;
@@ -1531,6 +1576,9 @@ int main(void)
 		 * off is still in the queue, and the first audio block would play it. The audio
 		 * thread honours this request at the top of that first block (sp1_midi.h). */
 		sp1_midi_on_enter();
+#endif
+#if defined(CONFIG_SP1_MIDIFILE)
+		sp1_mf_reset();          /* every ON starts with no file */
 #endif
 		{
 			const int arc = sp1_audio_start();
@@ -2184,6 +2232,11 @@ int main(void)
 				 * MARBLES it is [J], and on PLAITS it is output select (#11) --
 				 * so the panel cannot be left by accident (Adara, M4b). Tap "••"
 				 * to leave. */
+#if defined(CONFIG_SP1_MIDIFILE)
+				if (midifile_gesture(fnc)) {
+					/* rocker down + T1-T4: this tick's T press is taken */
+				} else
+#endif
 				if (!fnc && sp1_button_pressed(SP1_BTN_T4) &&
 				    !(marbles && sp1_mui_settings()) &&
 				    !(!marbles && sp1_pui_page() == SP1_PUI_SETTINGS)) {
@@ -2262,6 +2315,12 @@ int main(void)
 				midi_tick(dt, shutdown_active || rip_ms > 0u || prst_showing ||
 					  unpatch_ms >= SP1_UNPATCH_START_MS);
 				sp1_midi_main_tick(dt);
+#if defined(CONFIG_SP1_MIDIFILE)
+				sp1_mf_main_tick(sp1_store_midi_load);
+				if (!sp1_button_held(SP1_BTN_RWD)) {
+					rwd_combo = false;   /* after the release was seen above */
+				}
+#endif
 				/* Pickup shared / takeover: the CCs move the stored values of
 				 * BOTH modules, whichever is on show (nothing in sum). */
 				sp1_pui_midi();
