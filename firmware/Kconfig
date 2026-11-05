@@ -239,6 +239,22 @@ config SP1_PLAITS
 	  set CONFIG_SP1_PLAITS=n in prj.conf and rebuild: everything else in the
 	  build (headphone mute, LEDs, power) stays exactly as it was.
 
+config SP1_DRUM
+	bool "Experimental: drum hits on Marbles' t outputs"
+	default n
+	depends on SP1_PLAITS
+	help
+	  Adds KICK, SNARE and HAT to the t1-t3 destination ring (MARBLES t SHIFT). A t
+	  output routed to one strikes the Plaits voice with that drum engine (Plaits'
+	  bass drum, snare drum or hi-hat, at fixed settings: kDrums in sp1_synth.cc); the
+	  next TRIG -- RWD, the burst, MIDI or a t output routed to TRIG -- takes the voice
+	  back to the selected engine. One voice: a hit cuts the note before it, and a note
+	  cuts the hit. In the coin-toss model, with t2 -> TRIG (the default) and t3 ->
+	  KICK, every tick is either a note or a kick, and t BIAS sets the odds. PRST
+	  saves the routes as kick / snare / hat; a build without this option reads them
+	  as `none`. See docs/DRUMS.md.
+	  Off: the firmware is exactly as without this option. The emulator builds it on.
+
 config SP1_STRING_VOICES
 	int "String engine: number of strings (Plaits kNumStrings)"
 	range 1 3

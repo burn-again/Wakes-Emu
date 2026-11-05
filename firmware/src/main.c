@@ -214,6 +214,9 @@ static uint32_t prst_show_ms;
 static bool     prst_changed;
 static uint32_t beats_seen;            /* Marbles t2 ticks already shown             */
 static uint32_t trig_print0;           /* TRIG edges at the last AUD line            */
+#if defined(CONFIG_SP1_DRUM)
+static uint32_t drum_print0;           /* drum strikes at the last AUD line          */
+#endif
 
 static const char *const t_range_name[3] = { "x0.25", "x1", "x4" };
 static const char *const x_range_name[SP1_MRB_RANGE_COUNT] = {
@@ -2458,6 +2461,9 @@ int main(void)
 #if defined(CONFIG_SP1_PLAITS)
 				       " eng=%d mrb=%d trig=%u drv=%d qnt=%d"
 #endif
+#if defined(CONFIG_SP1_DRUM)
+				       " drum=%u"
+#endif
 				       "\n",
 				       as.running ? 1 : 0, as.blocks, as.write_fails,
 				       as.restarts,
@@ -2471,9 +2477,15 @@ int main(void)
 				       sp1_synth_trig_edges() - trig_print0,
 				       sp1_synth_drive(), sp1_pui_scale()
 #endif
+#if defined(CONFIG_SP1_DRUM)
+				       , sp1_synth_drum_hits() - drum_print0
+#endif
 				       );
 #if defined(CONFIG_SP1_PLAITS)
 				trig_print0 = sp1_synth_trig_edges();
+#if defined(CONFIG_SP1_DRUM)
+				drum_print0 = sp1_synth_drum_hits();
+#endif
 
 				/* Where those blocks went (issue #22), as avg/max percent
 				 * of the budget per section -- see sp1_audio.h. A line of

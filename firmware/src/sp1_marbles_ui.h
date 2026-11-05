@@ -71,6 +71,11 @@ enum sp1_mui_dest {
 	SP1_DEST_VOCT,           /* V/Oct: 12 semitones per volt, unattenuated         */
 	SP1_DEST_LEVEL,          /* LEVEL (the VCA / accent input)                     */
 	SP1_DEST_TRIG,           /* t outputs only                                     */
+#if defined(CONFIG_SP1_DRUM)
+	SP1_DEST_KICK,           /* t outputs only: strike Plaits as a drum (docs/DRUMS.md) */
+	SP1_DEST_SNARE,
+	SP1_DEST_HAT,
+#endif
 	SP1_DEST_COUNT
 };
 

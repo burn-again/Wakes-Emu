@@ -150,6 +150,9 @@ uint32_t sp1_synth_burst_count(void);     /* TRIGs fired by bursts, for the log 
 /* Rising edges actually delivered to Plaits' TRIG input since boot, from every
  * source (RWD, the burst, Marbles' t gates). For the log (M4). */
 uint32_t sp1_synth_trig_edges(void);
+#if defined(CONFIG_SP1_DRUM)
+uint32_t sp1_synth_drum_hits(void);      /* drum strikes (experimental, docs/DRUMS.md) */
+#endif
 
 /* ---- output select (M3f, UI-SPEC "Output select") ----
  * Plaits renders two signals per engine, OUT and AUX; this picks what reaches the

@@ -5,7 +5,8 @@
 // Wakes is woken by "••", held 2 s (power-on), TRIG is struck, the clock started, MIDI
 // played over USB, then "••" held 5 s (power-off). Checks: it boots, the drive gets its
 // CNFG files, audio is not silent, power-off reaches SYSTEM_OFF, "••" wakes it again
-// and the drive survives.
+// and the drive survives. Then, in a build with the drum hits, t3 goes to KICK and the
+// clock runs: kicks strike, the CPU stays in budget, and the route is saved in PRST.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -87,8 +88,41 @@ const second = log.slice(log.lastIndexOf('=== Wakes v0.9.0 ==='));
 check(/engines\.cnfg: \d+ B read, 0 problems/.test(second), 'second boot reads the CNFG files it wrote');
 check(/PRST 1: 1\.prst/.test(second), 'second boot loads the preset saved at power-off');
 
+// Drum hits (CONFIG_SP1_DRUM, docs/DRUMS.md; the emulator builds them on): MARBLES, t
+// SHIFT, T3 seven steps round the t ring to KICK, then the clock. In the coin-toss model
+// t2 (TRIG, the default) is every tick and t3 the coin, so the kicks fall among notes.
+const tap = (b, t) => { step(t); dev.setButton(b, true); step(t + 80); dev.setButton(b, false); };
+if (/ drum=\d+/.test(log)) {
+	tap(BTN.T4, 2800);
+	step(3200); dev.setFnc(true);
+	for (let k = 0; k < 7; k++) { tap(BTN.T3, 3300 + 200 * k); }
+	step(4800); dev.setFnc(false);
+	tap(BTN.PLAY, 5200);
+	step(5400);
+	dev.ex.emu_cpu_window_reset();
+	peak = 0;
+	step(13000);
+	const worst = 100 * dev.ex.emu_cpu(2) / (dev.ex.emu_audio_block_frames() * 64e6 / 48000);
+	const avg = 100 * dev.ex.emu_cpu(0) / dev.ex.emu_cpu(1) /
+		(dev.ex.emu_audio_block_frames() * 64e6 / 48000);
+	const drums = log.slice(log.lastIndexOf('=== Wakes v0.9.0 ==='));
+	const hits = [...drums.matchAll(/ drum=(\d+)/g)].reduce((s, m) => s + Number(m[1]), 0);
+	check(/ROUTE t3 -> KICK/.test(drums), 'drums: t SHIFT + T3 reaches KICK');
+	check(hits > 1 && peak > 0.05, `drums: ${hits} kicks struck (peak ${(20 * Math.log10(peak || 1e-9)).toFixed(1)} dBFS)`);
+	check(worst < 100, `drums: CPU avg ${avg.toFixed(1)} %, dearest block ${worst.toFixed(1)} %`);
+	dev.setFnc(true);
+	step(18500);
+	dev.setFnc(false);
+	step(20000);
+	dev.snapshotDrive();
+	const prst = dev.drive.get('/WAKES/PRST/1/1.prst');
+	check(dev.state === 'off' && prst && /= *kick/i.test(new TextDecoder().decode(prst.data)),
+		'drums: power-off saves the KICK route in 1.prst');
+} else {
+	console.log('skip  drums: this build has no CONFIG_SP1_DRUM');
+}
+
 const secs = (performance.now() - t0) / 1000;
-console.log(`\n${frames} frames of audio (${(frames / 48000).toFixed(1)} s), ` +
-	`device time ~${(12 + 2.6).toFixed(1)} s in ${secs.toFixed(2)} s wall ` +
-	`(${((12 + 2.6) / secs).toFixed(1)}x real time)`);
+console.log(`\n${frames} frames of audio (${(frames / 48000).toFixed(1)} s of device time) ` +
+	`in ${secs.toFixed(2)} s wall (${(frames / 48000 / secs).toFixed(1)}x real time)`);
 process.exit(ok ? 0 : 1);

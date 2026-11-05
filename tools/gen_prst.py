@@ -46,6 +46,17 @@ SINCE = {
     ('plaits', 'quantizer_root'): 2,
 }
 
+# ---- experimental tokens: {choice: (Kconfig symbol, [(token, C value)])} ------------------
+# Emitted inside #if defined(<symbol>), after the choice's own tokens, and NOT part of the
+# fingerprint: the format does not change, so a build with the option reads every existing
+# preset, and a build without it reads such a token as unknown -- that field's default --
+# as it reads any token it does not know. Before an option ships in a release, move its
+# tokens into CHOICES and add a format version.
+EXPERIMENTAL = {
+    'dest': ('CONFIG_SP1_DRUM', [('kick', 'SP1_DEST_KICK'), ('snare', 'SP1_DEST_SNARE'),
+                                 ('hat', 'SP1_DEST_HAT')]),
+}
+
 # ---- choices: (token written in the file, C expression of the value) ----------------------
 # Tokens are lowercase and space-free so a preset stays easy to edit by hand; reading ignores
 # case. The VALUE is a C expression -- an enum name where one exists -- so the table cannot
@@ -157,8 +168,11 @@ def validate():
             fail('%s.%s: unknown check %r' % (sec, key, check))
         if not key.isidentifier() or key != key.lower():
             fail('%s.%s: keys are lowercase identifiers' % (sec, key))
+    for name, (_, extra) in EXPERIMENTAL.items():
+        if name not in CHOICES:
+            fail('experimental tokens for unknown choice %r' % name)
     for name, toks in CHOICES.items():
-        t = [a for a, _ in toks]
+        t = [a for a, _ in toks + EXPERIMENTAL.get(name, (None, []))[1]]
         if len(set(t)) != len(t):
             fail('choice %s has a token twice' % name)
         for a in t:
@@ -230,6 +244,12 @@ def generate(out):
         L.append('static const struct sp1_prst_choice sp1_prst_ch_%s[] = {' % name)
         for tok, val in CHOICES[name]:
             L.append('\t{ %s, %s },' % (c_str(tok), val))
+        if name in EXPERIMENTAL:
+            sym, extra = EXPERIMENTAL[name]
+            L.append('#if defined(%s)    /* experimental: not in the fingerprint */' % sym)
+            for tok, val in extra:
+                L.append('\t{ %s, %s },' % (c_str(tok), val))
+            L.append('#endif')
         L.append('};')
     L.append('')
     L.append('static const struct sp1_prst_field SP1_PRST_FIELDS[SP1_PRST_NFIELDS] = {')

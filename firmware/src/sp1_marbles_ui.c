@@ -158,6 +158,11 @@ static const uint8_t x_ring[] = {
 static const uint8_t t_ring[] = {
 	SP1_DEST_NONE, SP1_DEST_TRIG, SP1_DEST_LEVEL, SP1_DEST_FM,
 	SP1_DEST_TIMBRE, SP1_DEST_MORPH, SP1_DEST_HARM,
+#if defined(CONFIG_SP1_DRUM)
+	/* Experimental (docs/DRUMS.md): after the existing six, so a ring a player knows
+	 * keeps its order and the drums come last. */
+	SP1_DEST_KICK, SP1_DEST_SNARE, SP1_DEST_HAT,
+#endif
 };
 #define X_RING_N ((int)(sizeof(x_ring) / sizeof(x_ring[0])))
 #define T_RING_N ((int)(sizeof(t_ring) / sizeof(t_ring[0])))
@@ -930,6 +935,12 @@ void sp1_mui_t_dest_pattern(int t, uint8_t o[4])
 	case SP1_DEST_HARM:   glyph4(o, 0x1u); break;   /* ○○○● */
 	case SP1_DEST_TRIG:   glyph4(o, 0x7u); break;   /* ○●●● */
 	case SP1_DEST_LEVEL:  glyph4(o, 0x3u); break;   /* ○○●● */
+#if defined(CONFIG_SP1_DRUM)
+	/* Patterns no other t destination uses (docs/DRUMS.md). */
+	case SP1_DEST_KICK:   glyph4(o, 0x9u); break;   /* ●○○● */
+	case SP1_DEST_SNARE:  glyph4(o, 0xAu); break;   /* ●○●○ */
+	case SP1_DEST_HAT:    glyph4(o, 0x5u); break;   /* ○●○● */
+#endif
 	default:              glyph4(o, 0x0u); break;   /* ○○○○ none */
 	}
 }
@@ -999,6 +1010,11 @@ const char *sp1_mui_dest_name(int d)
 	case SP1_DEST_HARM:   return "HARMONICS";
 	case SP1_DEST_LEVEL:  return "LEVEL";
 	case SP1_DEST_TRIG:   return "TRIG";
+#if defined(CONFIG_SP1_DRUM)
+	case SP1_DEST_KICK:   return "KICK";
+	case SP1_DEST_SNARE:  return "SNARE";
+	case SP1_DEST_HAT:    return "HAT";
+#endif
 	default:              return "none";
 	}
 }

@@ -24,6 +24,7 @@ DOCS = [
     ('PLAITS-ENGINES.md', 'Plaits engines'),
     ('MARBLES-SETTINGS.md', 'Marbles'),
     ('MIDI.md', 'MIDI'),
+    ('DRUMS.md', 'Drums'),
     ('DEFAULTS.md', 'Defaults'),
     ('SAFETY.md', 'Safety'),
 ]

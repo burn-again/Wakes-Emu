@@ -21,6 +21,9 @@ OVR=$OUT/ovr
 WHAT=${1:-all}
 WASM_OUT=${EMU_WASM_OUT:-$HERE/web/wakes.wasm}     # tools/calibrate.sh builds a second one
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}
+# Kconfig overrides on top of prj.conf. Unset: the emulator's own, the experimental drum
+# hits (docs/DRUMS.md) on. EMU_KCONFIG= (empty) builds exactly what prj.conf builds.
+EMU_KCONFIG=${EMU_KCONFIG-SP1_DRUM=y}
 
 mkdir -p "$GEN" "$OVR"
 

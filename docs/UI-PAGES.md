@@ -373,6 +373,9 @@ rings include **none**, so any output can be silenced.
 | **t1–t3** | none → TRIG → LEVEL → FM → TIMBRE → MORPH → HARMONICS → *(wrap)* |
 | **X1–X3, Y** | none → FM → TIMBRE → MORPH → HARMONICS → V/Oct → LEVEL → *(wrap)* |
 
+With the experimental `CONFIG_SP1_DRUM` (off in device builds, on in the emulator) the t ring
+continues HARMONICS → **KICK → SNARE → HAT** before it wraps: `docs/DRUMS.md`.
+
 Destination glyphs — **note the identical glyphs between TRIG and V/Oct, it is intentional**
 
 | destination | on t1–t3 | on X1–X3 / Y |

@@ -55,6 +55,20 @@ jobs:
           build/emu/native/wakes_headless --ms 9000 --quiet \
             0:fnc=1 2000:fnc=0 2500:rwd=1 2600:rwd=0 4000:fnc=1 8500:fnc=0
 
+      - name: Drum hits, t3 -> KICK (native)
+        run: |
+          build/emu/native/wakes_headless --ms 9000 --quiet --expect "ROUTE t3 -> KICK" \
+            0:fnc=1 2000:fnc=0 2500:t4=1 2580:t4=0 3000:fnc=1 \
+            3100:t3=1 3180:t3=0 3300:t3=1 3380:t3=0 3500:t3=1 3580:t3=0 3700:t3=1 3780:t3=0 \
+            3900:t3=1 3980:t3=0 4100:t3=1 4180:t3=0 4300:t3=1 4380:t3=0 4600:fnc=0 \
+            5000:play=1 5080:play=0
+
+      - name: Stock build, drums off (native, prj.conf only)
+        run: |
+          EMU_BUILD_DIR=build/emu-stock EMU_KCONFIG= sh emulator/build.sh native
+          build/emu-stock/native/wakes_headless --ms 9000 --quiet \
+            0:fnc=1 2000:fnc=0 2500:rwd=1 2600:rwd=0 4000:fnc=1 8500:fnc=0
+
       - name: Lifecycle (wasm, in Node)
         run: node emulator/web/test-node.mjs
 

@@ -72,6 +72,30 @@ void recompute_burst_period() {
 uint8_t mrb_gates_prev;                      // t1..t3 of the previous block (raw)
 bool trig_level_prev;                        // TRIG input level of the previous block
 volatile uint32_t trig_edges;                // rising edges sent to Plaits (log)
+
+#if defined(CONFIG_SP1_DRUM)
+// ---- drum hits (experimental, docs/DRUMS.md), audio thread ----
+// A t output routed to KICK / SNARE / HAT strikes the ONE voice with that Plaits drum
+// engine, at fixed settings; the next TRIG from anything else (RWD, the burst, MIDI, a t
+// routed to TRIG) takes the voice back to the selected engine. Plaits switches engines
+// with Reset() on the next Render, as it does when the engine fader moves, and its TRIG
+// delay (voice.h) means the engine has changed before the strike reaches it.
+struct DrumVoice {
+  int engine;                                // Plaits engine (voice.cc's registration order)
+  float note, harmonics, timbre, morph;      // MORPH is the decay on all three
+};
+const DrumVoice kDrums[3] = {
+  { 21, 33.0f, 0.40f, 0.45f, 0.50f },        // KICK  -- bass drum, A1 (55 Hz)
+  { 22, 50.0f, 0.55f, 0.50f, 0.40f },        // SNARE -- snare drum, D3
+  { 23, 64.0f, 0.55f, 0.65f, 0.25f },        // HAT   -- hi-hat, short
+};
+// With nothing else striking (a drone, or the clock stopped), a drum lets go of the voice
+// this long after its gate falls -- by then its tail has died away.
+const int kDrumHoldBlocks = static_cast<int>(1000u * SP1_SYNTH_BLOCKS_PER_MS);
+int drum_active = -1;                        // the drum that has the voice; -1: none
+int drum_hold_left;                          // Plaits blocks until it lets go
+volatile uint32_t drum_hits;                 // drum strikes (log)
+#endif
 volatile int burst_req;                      // main: 1 while FFWD is held
 int burst_on;                                // audio thread
 int32_t burst_countdown;                     // samples to the next burst TRIG (stopped)
@@ -500,6 +524,20 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     }
   }
 
+#if defined(CONFIG_SP1_DRUM)
+  // Which t outputs strike each drum this block (any number may share one).
+  uint8_t drum_mask[3] = { 0u, 0u, 0u };
+  for (int t = 0; t < 3; ++t) {
+    const int d = static_cast<int>(c.mrb_t_dest[t]) - SP1_DEST_KICK;
+    if (d >= 0 && d < 3) {
+      drum_mask[d] |= static_cast<uint8_t>(1u << t);
+    }
+  }
+  if (engine_changed) {
+    drum_active = -1;                  // a new engine choice is heard at once
+  }
+#endif
+
   bool pulse_started = false;          // a new RWD / burst TRIG this audio block
   const uint32_t tc = trig_count;
   if (tc != trig_seen) {
@@ -689,6 +727,9 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     float m[kRouteCount] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
     bool fm_patched = false, timbre_patched = false, morph_patched = false;
     bool harm_patched = false, level_routed = false;
+#if defined(CONFIG_SP1_DRUM)
+    uint8_t drum_raw = 0u, drum_rise = 0u;
+#endif
     if (mrb) {
       // TRIG: the routed t GATES (Marbles' gate lengths reach Plaits), and any
       // rising edge among them counts even if another routed gate is already high.
@@ -698,6 +739,10 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
       if (raw & static_cast<uint8_t>(~mrb_gates_prev) & trig_mask) {
         new_edge = true;
       }
+#if defined(CONFIG_SP1_DRUM)
+      drum_raw = raw;
+      drum_rise = raw & static_cast<uint8_t>(~mrb_gates_prev);
+#endif
       mrb_gates_prev = raw;
       level = level || (raw & trig_mask) != 0u;
 
@@ -722,6 +767,40 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     const float m_morph = Clamp(m[kRouteMorph], -kMaxTimbre, kMaxTimbre);
     const float m_harm = Clamp(m[kRouteHarm], -kMaxHarm, kMaxHarm);
     const float m_level = Clamp(m[kRouteLevel], 0.0f, 1.0f);
+#if defined(CONFIG_SP1_DRUM)
+    // ---- drum hits (docs/DRUMS.md) ----
+    // A rising gate on a t routed to a drum takes the voice from this block on; it strikes
+    // through the same TRIG path as a note (the re-strike below, Plaits' TRIG delay). Two
+    // drums in one block: KICK over SNARE over HAT, whichever t they come from -- so a hat
+    // on t2, the clock, fills the ticks Marbles' drum patterns leave on t1 / t3. A drum
+    // and a note in one block: the drum.
+    {
+      int hit = -1;
+      for (int d = 0; d < 3 && hit < 0; ++d) {
+        if ((drum_rise & drum_mask[d]) != 0u) {
+          hit = d;
+        }
+      }
+      if (hit >= 0) {
+        drum_active = hit;
+        drum_hold_left = kDrumHoldBlocks;
+        drum_hits = drum_hits + 1u;
+        new_edge = true;
+      } else if (new_edge) {
+        drum_active = -1;              // a note takes the voice back
+      } else if (drum_active >= 0) {
+        if ((drum_raw & drum_mask[drum_active]) != 0u) {
+          drum_hold_left = kDrumHoldBlocks;
+        } else if (--drum_hold_left <= 0) {
+          drum_active = -1;
+        }
+      }
+      if (drum_active >= 0) {
+        // The drum's own gates are TRIG while it has the voice.
+        level = level || (drum_raw & drum_mask[drum_active]) != 0u;
+      }
+    }
+#endif
     // A new edge while TRIG is already high: one low block, so Plaits sees it.
     if (new_edge && trig_level_prev) {
       level = false;
@@ -764,8 +843,13 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     // ⚠️ Only patch.note is latched. Marbles' V/Oct (mods.note) is deliberately NOT, and
     // cannot collide: selecting a scale unpatches every V/Oct route (the M4b interlock),
     // so the two are never live together.
+#if defined(CONFIG_SP1_DRUM)
+    const bool note_edge = new_edge && drum_active < 0;   // a drum hit is not a note
+#else
+    const bool note_edge = new_edge;
+#endif
     if (c.note_hold) {
-      if (new_edge || !note_held_valid) {
+      if (note_edge || !note_held_valid) {
         note_held = c.note;
         note_held_valid = true;
       }
@@ -782,15 +866,43 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
       patch.note += mf.note + midi_freq;
     }
 #endif
+    const plaits::Patch* render_patch = &patch;
+#if defined(CONFIG_SP1_DRUM)
+    // A drum plays at its own settings: nothing the faders, Marbles' X or MIDI pitch do
+    // to the selected engine reaches it, and LEVEL is unpatched (accent 0.8; the drum
+    // engines make their own envelope, so the LPG is bypassed anyway).
+    plaits::Patch drum_patch;
+    if (drum_active >= 0) {
+      const DrumVoice& dv = kDrums[drum_active];
+      drum_patch = patch;
+      drum_patch.engine = dv.engine;
+      drum_patch.note = dv.note;
+      drum_patch.harmonics = dv.harmonics;
+      drum_patch.timbre = dv.timbre;
+      drum_patch.morph = dv.morph;
+      drum_patch.frequency_modulation_amount = 0.0f;
+      drum_patch.timbre_modulation_amount = 0.0f;
+      drum_patch.morph_modulation_amount = 0.0f;
+      drum_patch.harmonics_modulation_amount = 0.0f;
+      render_patch = &drum_patch;
+      mods.note = 0.0f;
+      mods.frequency = 0.0f;
+      mods.frequency_patched = false;
+      mods.timbre_patched = false;
+      mods.morph_patched = false;
+      mods.harmonics_patched = false;
+      mods.level_patched = false;
+    }
+#endif
     ++j;
     const uint32_t prof_e0 = Now();
     const uint32_t miss_e0 = Miss();
     if (fading) {
       const float t0 = static_cast<float>(j - 1u) * fade_step;
-      voice->Render(patch, mods, MixLerp(mix_was, mix_now, t0),
+      voice->Render(*render_patch, mods, MixLerp(mix_was, mix_now, t0),
                     MixLerp(mix_was, mix_now, t0 + fade_step), v, plaits::kBlockSize);
     } else {
-      voice->Render(patch, mods, mix_now, mix_now, v, plaits::kBlockSize);
+      voice->Render(*render_patch, mods, mix_now, mix_now, v, plaits::kBlockSize);
     }
     const uint32_t prof_e1 = Now();
     const uint32_t miss_e1 = Miss();
@@ -902,6 +1014,12 @@ extern "C" int sp1_synth_drive(void) {
 extern "C" uint32_t sp1_synth_trig_edges(void) {
   return trig_edges;
 }
+
+#if defined(CONFIG_SP1_DRUM)
+extern "C" uint32_t sp1_synth_drum_hits(void) {
+  return drum_hits;
+}
+#endif
 
 extern "C" uint32_t sp1_synth_burst_count(void) {
   return burst_count;
