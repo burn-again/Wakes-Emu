@@ -317,10 +317,12 @@ static unsigned i2s_qn;
 static uint64_t i2s_t0, i2s_ticks, i2s_next;
 static uint32_t i2s_frames;          /* per block */
 int      emu_i2s_running;
+uint32_t emu_i2s_writes;
 int16_t  emu_audio_ring[EMU_AUDIO_RING_FRAMES * 2];
 uint32_t emu_audio_wr;
 uint32_t emu_audio_underruns;
 static int i2s_q_obj;                /* what a full i2s_write pends on */
+uint32_t emu_i2s_block_frames(void) { return i2s_frames; }
 
 static unsigned i2s_qcap(void)
 {
@@ -397,6 +399,7 @@ int i2s_write(const struct device *dev, void *blk, size_t size)
 		}
 	}
 	i2s_q[i2s_qn++] = blk;
+	emu_i2s_writes++;
 	return 0;
 }
 

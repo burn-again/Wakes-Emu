@@ -33,6 +33,16 @@ void emu_start_main(int (*main_fn)(void));
 struct k_thread *emu_sched_pick(uint64_t limit);
 /* The current thread gives up the CPU (it has set its own state first). */
 void emu_switch(void);
+/* Around every run of a thread: makes it current, and charges it the CPU cycles counted
+ * on DWT->CYCCNT while it ran (the wasm build counts them; see tools/wasm_cycles.py). */
+void emu_run_begin(struct k_thread *t);
+void emu_run_end(void);
+/* The CPU meter's window: 0 audio-thread cycles, 1 audio blocks they made, 2 the dearest
+ * single block, 3 all threads' cycles, 4 the window's length in CPU cycles, 5 main's,
+ * 6 the storage thread's; 10-17 the audio thread's cycles per kind of work (profiling
+ * builds only). */
+double emu_cpu_stat(int which);
+void   emu_cpu_reset(void);
 /* Called by the arch layer when a thread's entry function returns. */
 void emu_thread_exited(struct k_thread *t);
 /* Wake every thread pended on obj, or only the best one; returns how many. */
@@ -85,6 +95,8 @@ extern int16_t  emu_audio_ring[EMU_AUDIO_RING_FRAMES * 2];
 extern uint32_t emu_audio_wr;           /* frames written, total (wraps)      */
 extern uint32_t emu_audio_underruns;
 extern int      emu_i2s_running;
+extern uint32_t emu_i2s_writes;         /* blocks accepted by i2s_write, total */
+uint32_t emu_i2s_block_frames(void);    /* frames per audio block, as Wakes configured I2S */
 
 /* Console output (printk, after Wakes' own hook). */
 void emu_console_write(const char *s, size_t n);

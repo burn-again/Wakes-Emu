@@ -39,6 +39,7 @@ function consoleOut(s) {
 		if (m) { $('fw-version').textContent = `firmware v${m[1]}`; }
 		followManual(line);
 		recLine(line);
+		cpuLine(line);
 	}
 }
 function hostNote(s) { appendText(`── ${s} ──\n`, 'h'); }
@@ -165,7 +166,7 @@ function frame() {
 			pled[i].style.setProperty('--b', l[4 + i] > 0 ? (0.12 + 0.88 * Math.pow(l[4 + i], 0.45)).toFixed(3) : '0');
 		}
 		if (dev.state === 'on') {
-			setChip('on', `running · ${(dev.nowMs() / 1000).toFixed(1)} s`);
+			setChip('on', `running · ${(dev.nowMs() / 1000).toFixed(1)} s${cpu.mean !== null ? ` · CPU ${Math.round(cpu.mean)} %` : ''}`);
 			$('hint').hidden = dev.nowMs() > 4000;
 		} else if (dev.lastStop === STOP.SYSTEM_OFF) {
 			setChip('off', 'off (SYSTEM_OFF)');
@@ -603,6 +604,155 @@ setInterval(() => {
 	}
 }, 1000);
 setInterval(saveDrive, 5000);
+
+// ------------------------------------------------------------------ CPU meter
+// The wasm build adds every basic block's estimated Cortex-M4F cost to DWT->CYCCNT, the
+// counter Wakes times its audio with (tools/wasm_cycles.py, calibrated by
+// tools/calibrate.sh against Wakes' hardware measurements). The kernel charges each thread
+// what it counted while it ran; this samples the audio thread's cost per block.
+const cpu = { mean: null, peak: null, hist: [], model: null };
+const CPU_HIST = 240;                  // 60 s at 4 samples a second
+
+function cpuLevel(mean) {
+	if (mean === null) { return ['idle', 'off']; }
+	if (mean >= 100) { return ['over', 'would drop audio']; }
+	if (mean >= 85) { return ['high', 'little headroom']; }
+	if (mean >= 70) { return ['tight', 'tight']; }
+	return ['ok', 'fits'];
+}
+
+function sampleCpu() {
+	const ex = dev && dev.state === 'on' ? dev.ex : null;
+	if (!ex || !ex.emu_cpu) {
+		cpu.mean = cpu.peak = null;
+		renderCpu();
+		return;
+	}
+	const blocks = ex.emu_cpu(1);
+	const frames = ex.emu_audio_block_frames();
+	const wall = ex.emu_cpu(4);
+	if (blocks < 1 || !frames || wall <= 0) {
+		cpu.mean = cpu.peak = null;
+		ex.emu_cpu_window_reset();
+		renderCpu();
+		return;
+	}
+	const budget = frames * 64e6 / 48000;
+	cpu.mean = 100 * ex.emu_cpu(0) / blocks / budget;
+	cpu.peak = 100 * ex.emu_cpu(2) / budget;
+	cpu.blockMs = frames / 48;
+	const share = (k) => 100 * ex.emu_cpu(k) / wall;
+	cpu.threads = { audio: share(0), main: share(5), store: share(6), all: share(3) };
+	ex.emu_cpu_window_reset();
+	cpu.hist.push([cpu.mean, cpu.peak]);
+	if (cpu.hist.length > CPU_HIST) { cpu.hist.shift(); }
+	renderCpu();
+}
+
+function renderCpu() {
+	const [level, word] = cpuLevel(cpu.mean);
+	$('cpu-body').dataset.level = level;
+	$('cpu-pill').dataset.level = level;
+	$('cpu-pill').textContent = word;
+	if (cpu.mean === null) {
+		$('cpu-mean').textContent = '–';
+		$('cpu-peak').textContent = '–';
+		$('cpu-fill').style.width = '0';
+		$('cpu-pk').style.left = '0';
+		$('cpu-threads').textContent = dev && dev.state === 'on' ? 'waiting for audio' : 'the device is off';
+	} else {
+		const pos = (v) => `${Math.min(100, v / 1.2).toFixed(2)}%`;      // the bar spans 0-120 %
+		$('cpu-mean').textContent = cpu.mean.toFixed(0);
+		$('cpu-peak').textContent = `${cpu.peak.toFixed(0)} %`;
+		$('cpu-block').textContent = `${+cpu.blockMs.toFixed(2)} ms`;
+		$('cpu-fill').style.width = pos(cpu.mean);
+		$('cpu-pk').style.left = pos(cpu.peak);
+		const t = cpu.threads;
+		$('cpu-threads').textContent = `audio ${t.audio.toFixed(0)} · main ${t.main.toFixed(1)} · storage ${t.store.toFixed(1)} · idle ${Math.max(0, 100 - t.all).toFixed(0)} (%)`;
+	}
+	drawSpark();
+}
+
+function drawSpark() {
+	const c = $('cpu-spark');
+	const dpr = window.devicePixelRatio || 1;
+	const w = c.clientWidth, h = c.clientHeight;
+	if (!w || !h) { return; }
+	if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+	const g = c.getContext('2d');
+	g.setTransform(dpr, 0, 0, dpr, 0, 0);
+	g.clearRect(0, 0, w, h);
+	const css = getComputedStyle(document.documentElement);
+	const tok = (n) => css.getPropertyValue(n).trim();
+	const y = (v) => h - 2 - (Math.min(v, 120) / 120) * (h - 4);
+	g.lineWidth = 1;
+	g.setLineDash([3, 3]);
+	for (const [v, col] of [[85, tok('--warn')], [100, tok('--signal')]]) {
+		g.strokeStyle = col; g.globalAlpha = 0.7;
+		g.beginPath(); g.moveTo(0, y(v)); g.lineTo(w, y(v)); g.stroke();
+	}
+	g.setLineDash([]);
+	g.globalAlpha = 1;
+	const n = cpu.hist.length;
+	if (n < 2) { return; }
+	const x = (i) => w - (n - 1 - i) * (w / (CPU_HIST - 1));
+	g.beginPath();
+	g.moveTo(x(0), h);
+	cpu.hist.forEach(([m], i) => g.lineTo(x(i), y(m)));
+	g.lineTo(x(n - 1), h);
+	g.closePath();
+	g.fillStyle = tok('--ok'); g.globalAlpha = 0.22; g.fill();
+	g.globalAlpha = 1;
+	g.beginPath();
+	cpu.hist.forEach(([m], i) => (i ? g.lineTo(x(i), y(m)) : g.moveTo(x(i), y(m))));
+	g.strokeStyle = tok('--ok'); g.lineWidth = 1.5; g.stroke();
+	g.beginPath();
+	cpu.hist.forEach(([, p], i) => (i ? g.lineTo(x(i), y(p)) : g.moveTo(x(i), y(p))));
+	g.strokeStyle = tok('--ink-2'); g.lineWidth = 1; g.stroke();
+	const last = cpu.hist[n - 1][0];
+	g.fillStyle = tok('--ink');
+	g.beginPath(); g.arc(x(n - 1) - 2, y(last), 2.5, 0, Math.PI * 2); g.fill();
+}
+
+// Wakes' own 5-second report: its AUD line (the figure the hardware table quotes) and its
+// CPU line, which splits the block into the engine, Marbles, routing, after and output.
+function cpuLine(line) {
+	let m;
+	if ((m = /^AUD run=\d+ .*?cyc avg=([\d.]+)% max=([\d.]+)%/.exec(line))) {
+		$('cpu-wakes').textContent = `AUD: mean ${(+m[1]).toFixed(1)} %, worst block ${(+m[2]).toFixed(1)} % (last 5 s)`;
+	} else if ((m = /^CPU eng=([\d.]+)\/[\d.]+ mrb=([\d.]+)\/[\d.]+ rte=([\d.]+)\/[\d.]+ post=([\d.]+)\/[\d.]+ out=([\d.]+)/.exec(line))) {
+		$('cpu-sections').textContent = `engine ${m[1]} · Marbles ${m[2]} · routing ${m[3]} · after ${m[4]} · output ${m[5]} (% of the block)`;
+	}
+}
+
+async function loadCpuModel() {
+	try {
+		const r = await fetch('cpu.json');
+		if (r.ok) { cpu.model = await r.json(); }
+	} catch { /* shown below */ }
+	const body = $('cpu-acc-body');
+	body.textContent = '';
+	const m = cpu.model;
+	const p = (text) => { const e = document.createElement('p'); e.textContent = text; body.appendChild(e); };
+	if (!m || !m.check) {
+		$('cpu-acc-sum').textContent = 'How close is this to the device? (uncalibrated)';
+		p('This build has no calibration (emulator/cpu.json): the figures are raw instruction-cost estimates. Run emulator/tools/calibrate.sh.');
+		return;
+	}
+	const c = m.check, f = m.fit;
+	$('cpu-acc-sum').textContent = `How close is this to the device? Typically within ±${Math.round(f.loo_rms_points)} points.`;
+	p(`Each piece of code adds its estimated cost on the SP-1's Cortex-M4F to the cycle counter Wakes times its audio with, so Wakes' own AUD, CPU and THREADS lines read it too. The weights were fitted to ${f.engines} engines measured on an SP-1 (docs/PLAITS-ENGINES.md, with Marbles running): ${c.rms_points} points RMS across them, ${f.loo_rms_points} on an engine left out of the fit, worst ${c.worst.name} at ${c.worst.error > 0 ? '+' : ''}${c.worst.error}.`);
+	p('Read it as ± that much. Code is not timed here, only counted: interrupts, flash wait states and the cache are averaged into the weights, not modelled. Before you rely on less than ~15 points of headroom, measure on the device.');
+	const tbl = document.createElement('div');
+	tbl.className = 'tbl';
+	const rows = c.engines.map((e) => `<tr class="${e.fitted ? '' : 'out'}"><td>${e.name}${e.fitted ? '' : ' *'}</td><td>${e.hardware.toFixed(1)}</td><td>${e.emulator.toFixed(1)}</td><td>${e.error > 0 ? '+' : ''}${e.error.toFixed(1)}</td></tr>`).join('');
+	tbl.innerHTML = `<table><thead><tr><th>engine</th><th>SP-1 %</th><th>meter %</th><th>error</th></tr></thead><tbody>${rows}</tbody></table>`;
+	body.appendChild(tbl);
+	p(`Measured as the hardware was: ${c.measured_with}. * Not fitted: ${Object.entries(m.excluded || {}).map(([k, v]) => `${k}, ${v}`).join('; ')}.`);
+}
+
+setInterval(sampleCpu, 250);
+window.addEventListener('resize', drawSpark);
 
 // ------------------------------------------------------------------ manual + reference
 const UPSTREAM = 'https://github.com/Worldwave/Wakes/blob/main/';
@@ -1115,6 +1265,7 @@ async function loadManual() {
 async function start() {
 	for (let i = 0; i < 4; i++) { setFader(i, 0.5); }
 	loadManual();
+	loadCpuModel();
 	let module;
 	try {
 		module = await loadWasm();

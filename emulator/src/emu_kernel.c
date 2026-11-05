@@ -26,8 +26,81 @@ static int (*main_fn)(void);
 
 void emu_set_now(uint64_t t)
 {
+	/* DWT->CYCCNT counts CPU cycles. Time passing advances it; in the wasm build the code
+	 * itself advances it too, by its estimated cost (tools/wasm_cycles.py), which is what
+	 * Wakes' own CPU accounting reads. So: add, never overwrite. */
+	emu_dwt.CYCCNT += (uint32_t)(t - emu_now);
 	emu_now = t;
-	emu_dwt.CYCCNT = (uint32_t)t;   /* DWT counts CPU cycles: Wakes' synth reads it */
+}
+
+/* ------------------------------------------------------------------ CPU accounting */
+
+static uint32_t run_c0, run_w0;
+static struct {
+	uint64_t audio, audio_blocks, audio_max, all, main, store, start;
+	uint64_t cls[8];
+} cw;
+
+/* A profiling build (EMU_CPU_PROFILE=1) counts each kind of work here instead of on
+ * DWT->CYCCNT: 0 float, 1 memory, 2 integer, 3 control flow, 4 maths library.
+ * tools/calibrate_cpu.mjs fits a weight per kind from the audio thread's share. */
+uint32_t emu_cpu_classes[8];
+static uint32_t run_cls0[8];
+
+void emu_run_begin(struct k_thread *t)
+{
+	emu_current = t;
+	run_c0 = emu_dwt.CYCCNT;
+	run_w0 = emu_i2s_writes;
+	memcpy(run_cls0, emu_cpu_classes, sizeof(run_cls0));
+}
+
+void emu_run_end(void)
+{
+	struct k_thread *t = emu_current;
+	emu_current = NULL;
+	if (!t) {
+		return;
+	}
+	const uint32_t d = emu_dwt.CYCCNT - run_c0;
+	t->cpu_cycles += d;
+	cw.all += d;
+	if (strcmp(t->name, "audio") == 0) {
+		const uint32_t blocks = emu_i2s_writes - run_w0;
+		cw.audio += d;
+		cw.audio_blocks += blocks;
+		for (int k = 0; k < 8; k++) {
+			cw.cls[k] += emu_cpu_classes[k] - run_cls0[k];
+		}
+		if (blocks == 1u && d > cw.audio_max) {
+			cw.audio_max = d;
+		}
+	} else if (strcmp(t->name, "main") == 0) {
+		cw.main += d;
+	} else if (strcmp(t->name, "store") == 0) {
+		cw.store += d;
+	}
+}
+
+double emu_cpu_stat(int which)
+{
+	switch (which) {
+	case 0: return (double)cw.audio;
+	case 1: return (double)cw.audio_blocks;
+	case 2: return (double)cw.audio_max;
+	case 3: return (double)cw.all;
+	case 4: return (double)(emu_now - cw.start);
+	case 5: return (double)cw.main;
+	case 6: return (double)cw.store;
+	default:
+		return (which >= 10 && which < 18) ? (double)cw.cls[which - 10] : 0.0;
+	}
+}
+
+void emu_cpu_reset(void)
+{
+	memset(&cw, 0, sizeof(cw));
+	cw.start = emu_now;
 }
 
 void emu_kernel_reset(void)
@@ -37,7 +110,9 @@ void emu_kernel_reset(void)
 	seq = 0;
 	sched_locked = 0;
 	emu_stop_reason = EMU_STOP_NONE;
-	emu_set_now(0);
+	emu_now = 0;
+	emu_dwt.CYCCNT = 0;
+	emu_cpu_reset();
 }
 
 /* ------------------------------------------------------------------ scheduling */
@@ -269,18 +344,25 @@ int k_thread_stack_space_get(const struct k_thread *t, size_t *unused)
 	return 0;
 }
 
+/* What each thread ran, in estimated CPU cycles (zero in the native build, which does not
+ * count): Wakes' THREADS line divides these by the wall time to show each thread's share. */
 int k_thread_runtime_stats_get(k_tid_t t, k_thread_runtime_stats_t *s)
 {
-	ARG_UNUSED(t);
-	memset(s, 0, sizeof(*s));   /* CPU time is not modelled */
+	memset(s, 0, sizeof(*s));
+	if (t) {
+		s->execution_cycles = t->cpu_cycles;
+		s->total_cycles = t->cpu_cycles;
+	}
 	return 0;
 }
 
 int k_thread_runtime_stats_all_get(k_thread_runtime_stats_t *s)
 {
 	memset(s, 0, sizeof(*s));
-	s->execution_cycles = emu_now;
-	s->total_cycles = emu_now;
+	for (struct k_thread *t = emu_threads; t; t = t->next_all) {
+		s->execution_cycles += t->cpu_cycles;
+	}
+	s->total_cycles = s->execution_cycles;
 	return 0;
 }
 

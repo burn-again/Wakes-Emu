@@ -48,6 +48,11 @@ EMU_EXPORT uint32_t emu_audio_written(void) { return emu_audio_wr; }
 EMU_EXPORT uint32_t emu_audio_underrun_count(void) { return emu_audio_underruns; }
 EMU_EXPORT int      emu_audio_running(void) { return emu_i2s_running; }
 
+/* ---- the CPU meter (estimated cycles; the wasm build counts them) ---- */
+EMU_EXPORT double emu_cpu(int which) { return emu_cpu_stat(which); }
+EMU_EXPORT void   emu_cpu_window_reset(void) { emu_cpu_reset(); }
+EMU_EXPORT uint32_t emu_audio_block_frames(void) { return emu_i2s_block_frames(); }
+
 /* ---- MIDI from the host (USB-MIDI, only while USB is a computer) ---- */
 static uint8_t midi_stage[256];
 EMU_EXPORT uint8_t *emu_midi_buf(void) { return midi_stage; }

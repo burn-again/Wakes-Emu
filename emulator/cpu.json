@@ -1,0 +1,136 @@
+{
+ "scale": 1,
+ "classes": {
+  "fp": 1.3511,
+  "mem": 1.4541,
+  "int": 1.429,
+  "ctl": 1.0793,
+  "lib": 1
+ },
+ "fit": {
+  "engines": 11,
+  "loo_rms_points": 7.3,
+  "single_factor_loo_rms_points": 7.4,
+  "ridge": 3
+ },
+ "excluded": {
+  "additive": "changed after the hardware session (M4e: kRampStride 4 to 2, more work per sample)",
+  "chiptune": "renders one voice here (TRIG is always patched in v0.9.0); 73.7 % fits its five-voice chord mode"
+ },
+ "source": "docs/PLAITS-ENGINES.md, \"Re-measured on hardware with the M4a-M4d build, Marbles running\"",
+ "measured_with": "Plaits block 12, 240-frame audio blocks (the M4a-M4d firmware's configuration)",
+ "check": {
+  "rms_points": 6.6,
+  "worst": {
+   "name": "modal",
+   "error": -15.3
+  },
+  "engines": [
+   {
+    "name": "wave-terrain",
+    "plaits": 5,
+    "hardware": 82.3,
+    "emulator": 80.93,
+    "error": -1.4,
+    "fitted": true
+   },
+   {
+    "name": "chiptune",
+    "plaits": 7,
+    "hardware": 73.7,
+    "emulator": 37.38,
+    "error": -36.3,
+    "fitted": false
+   },
+   {
+    "name": "virtual-analog",
+    "plaits": 8,
+    "hardware": 56.5,
+    "emulator": 70.65,
+    "error": 14.2,
+    "fitted": true
+   },
+   {
+    "name": "waveshaping",
+    "plaits": 9,
+    "hardware": 55.9,
+    "emulator": 60.36,
+    "error": 4.5,
+    "fitted": true
+   },
+   {
+    "name": "additive",
+    "plaits": 12,
+    "hardware": 67.4,
+    "emulator": 84.92,
+    "error": 17.5,
+    "fitted": false
+   },
+   {
+    "name": "wavetable",
+    "plaits": 13,
+    "hardware": 73.9,
+    "emulator": 73.82,
+    "error": -0.1,
+    "fitted": true
+   },
+   {
+    "name": "swarm",
+    "plaits": 16,
+    "hardware": 79.5,
+    "emulator": 81.58,
+    "error": 2.1,
+    "fitted": true
+   },
+   {
+    "name": "filtered-noise",
+    "plaits": 17,
+    "hardware": 66.1,
+    "emulator": 64.04,
+    "error": -2.1,
+    "fitted": true
+   },
+   {
+    "name": "particle",
+    "plaits": 18,
+    "hardware": 47.6,
+    "emulator": 45.95,
+    "error": -1.6,
+    "fitted": true
+   },
+   {
+    "name": "string",
+    "plaits": 19,
+    "hardware": 71.3,
+    "emulator": 69.13,
+    "error": -2.2,
+    "fitted": true
+   },
+   {
+    "name": "modal",
+    "plaits": 20,
+    "hardware": 73,
+    "emulator": 57.72,
+    "error": -15.3,
+    "fitted": true
+   },
+   {
+    "name": "bass-drum",
+    "plaits": 21,
+    "hardware": 75.3,
+    "emulator": 73.91,
+    "error": -1.4,
+    "fitted": true
+   },
+   {
+    "name": "hi-hat",
+    "plaits": 23,
+    "hardware": 77,
+    "emulator": 77.48,
+    "error": 0.5,
+    "fitted": true
+   }
+  ],
+  "measured_with": "Plaits block 12, 240-frame audio blocks (the M4a-M4d firmware's configuration)"
+ }
+}

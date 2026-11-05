@@ -19,6 +19,7 @@
 	--line: #c8cdd1;
 	--signal: #d33a2c;         /* the PLAY triangle; used for live/attention */
 	--ok: #2c7a51;
+	--warn: #a86a12;           /* tight: the CPU meter's amber */
 	--body: #2b2d30;           /* the device itself: same in both themes     */
 	--body-edge: #1d1f21;
 	--strip: #9a9fa4;
@@ -42,14 +43,14 @@
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme="light"]) {
 		--bench: #15181b; --panel: #1e2226; --ink: #e5e8ea; --ink-2: #9aa3ab;
-		--line: #333a40; --signal: #ff5b4c; --ok: #5cc28c; --body: #303337;
+		--line: #333a40; --signal: #ff5b4c; --ok: #5cc28c; --warn: #e3a646; --body: #303337;
 		--body-edge: #0e0f10; --strip: #858a8f; --strip-down: #6b7075; --strip-ink: #16181a; --key: #42464b;
 		--key-down: #5d6268; color-scheme: dark;
 	}
 }
 :root[data-theme="dark"] {
 	--bench: #15181b; --panel: #1e2226; --ink: #e5e8ea; --ink-2: #9aa3ab;
-	--line: #333a40; --signal: #ff5b4c; --ok: #5cc28c; --body: #303337;
+	--line: #333a40; --signal: #ff5b4c; --ok: #5cc28c; --warn: #e3a646; --body: #303337;
 	--body-edge: #0e0f10; --strip: #858a8f; --strip-down: #6b7075; --strip-ink: #16181a; --key: #42464b;
 	--key-down: #5d6268; color-scheme: dark;
 }
@@ -307,6 +308,38 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 	max-width: 1180px; margin: 0 auto 16px; padding: 12px 14px; border: 1px solid var(--signal);
 	border-radius: var(--r); background: var(--panel);
 }
+/* CPU meter */
+.cpu { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr); gap: 14px 22px; align-items: start; }
+@media (max-width: 560px) { .cpu { grid-template-columns: minmax(0, 1fr); } }
+.cpu-big { font: 600 46px/1 var(--font-label); font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+.cpu-big .unit { font-size: 24px; color: var(--ink-2); margin-left: 2px; }
+.cpu-cap { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+.cpu-bar { position: relative; height: 10px; margin-top: 10px; border-radius: 5px; background: var(--bench); overflow: visible; }
+.cpu-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 5px; background: var(--ok); transition: width 200ms; }
+.cpu-bar .pk { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); left: 0; }
+.cpu-bar i { position: absolute; top: -4px; bottom: -4px; width: 1px; background: var(--ink-2); opacity: 0.6; }
+.cpu-bar b { position: absolute; top: 13px; transform: translateX(-50%); font: 500 10px var(--font-mono); color: var(--ink-2); }
+.cpu[data-level="tight"] .fill { background: var(--warn); }
+.cpu[data-level="high"] .fill, .cpu[data-level="over"] .fill { background: var(--signal); }
+.pill { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font: 600 11px var(--font-mono); letter-spacing: 0.04em; border: 1px solid var(--line); color: var(--ink-2); }
+.pill[data-level="ok"] { color: var(--ok); border-color: var(--ok); }
+.pill[data-level="tight"] { color: var(--warn); border-color: var(--warn); }
+.pill[data-level="high"], .pill[data-level="over"] { color: var(--signal); border-color: var(--signal); }
+.pill[data-level="over"] { background: var(--signal); color: #fff; }
+.cpu-right { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cpu-spark { width: 100%; height: 70px; display: block; }
+.cpu-rows { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 12px; font-size: 12px; }
+.cpu-rows dt { color: var(--ink-2); }
+.cpu-rows dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.cpu-acc { grid-column: 1 / -1; font-size: 12.5px; color: var(--ink-2); }
+.cpu-acc summary { cursor: pointer; color: var(--ink); }
+.cpu-acc p { margin: 6px 0; max-width: 80ch; }
+.cpu-acc .tbl { overflow-x: auto; }
+.cpu-acc table { border-collapse: collapse; font: 12px var(--font-mono); font-variant-numeric: tabular-nums; }
+.cpu-acc th, .cpu-acc td { border-bottom: 1px solid var(--line); padding: 3px 10px 3px 0; text-align: right; }
+.cpu-acc th:first-child, .cpu-acc td:first-child { text-align: left; }
+.cpu-acc tr.out td { opacity: 0.55; }
+
 /* manual + reference */
 .opts { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 8px 14px 0; }
 .page-inner { position: relative; }
@@ -458,6 +491,37 @@ select { padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r
 			</div>
 			<p class="toast" id="play-toast" aria-live="polite"></p>
 			<p class="caption" id="manual-caption" aria-live="polite"></p>
+		</div>
+
+		<div class="inst" id="cpu-panel">
+			<div class="head">
+				<h2>CPU</h2><span class="sub">estimated for the SP-1's 64 MHz Cortex-M4F</span>
+				<span class="spacer"></span>
+				<span class="pill" id="cpu-pill" data-level="idle">off</span>
+			</div>
+			<div class="body cpu" id="cpu-body" data-level="idle">
+				<div class="cpu-now">
+					<div class="cpu-big"><span id="cpu-mean">–</span><span class="unit">%</span></div>
+					<div class="cpu-cap">of each <span id="cpu-block">2 ms</span> audio block, mean · peak <span id="cpu-peak">–</span></div>
+					<div class="cpu-bar" aria-hidden="true">
+						<span class="fill" id="cpu-fill"></span><span class="pk" id="cpu-pk"></span>
+						<i style="left:70.8%"></i><b style="left:70.8%">85</b>
+						<i style="left:83.3%"></i><b style="left:83.3%">100</b>
+					</div>
+				</div>
+				<div class="cpu-right">
+					<canvas class="cpu-spark" id="cpu-spark" aria-label="Audio block cost over the last minute"></canvas>
+					<dl class="cpu-rows">
+						<dt>All of the CPU</dt><dd id="cpu-threads">–</dd>
+						<dt>Wakes' own report</dt><dd id="cpu-wakes">every 5 s, once Wakes is on</dd>
+						<dt>Inside the block</dt><dd id="cpu-sections">–</dd>
+					</dl>
+				</div>
+				<details class="cpu-acc" id="cpu-acc">
+					<summary id="cpu-acc-sum">How close is this to the device?</summary>
+					<div id="cpu-acc-body"><p>The emulator counts what each piece of code would cost on the SP-1's processor and adds it to the cycle counter Wakes times its audio with.</p></div>
+				</details>
+			</div>
 		</div>
 
 		<div class="inst">

@@ -151,6 +151,7 @@ struct k_thread {
 	void     *arch;           /* native: ucontext; wasm: asyncify data             */
 	int       started;
 	uint64_t  run_switches;
+	uint64_t  cpu_cycles;     /* estimated CPU cycles it has run (wasm build)       */
 	struct k_thread *next_all;
 };
 typedef struct k_thread *k_tid_t;

@@ -19,6 +19,7 @@ FELDD=$ROOT/third_party/feldd/src
 GEN=$OUT/gen
 OVR=$OUT/ovr
 WHAT=${1:-all}
+WASM_OUT=${EMU_WASM_OUT:-$HERE/web/wakes.wasm}     # tools/calibrate.sh builds a second one
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}
 
 mkdir -p "$GEN" "$OVR"
@@ -128,15 +129,28 @@ build() {   # $1 = native|web
 	else
 		RAW=$OUT/web/wakes-raw.wasm
 		$CXX -mexec-model=reactor -o "$RAW" $OBJS \
-			-Wl,--export-dynamic -Wl,--export=__stack_pointer \
+			-Wl,--export-dynamic -Wl,--export=__stack_pointer -Wl,--export=emu_dwt -Wl,--export=emu_cpu_classes \
 			-Wl,-z,stack-size=1048576 -Wl,--initial-memory=33554432 -lm
 		# Asyncify: every function that can reach emu_host_switch can unwind and rewind.
 		# The DSP never can, so it is left alone (and stays fast).
-		wasm-opt "$RAW" -O2 --asyncify \
+		# The CPU meter: every basic block adds its estimated Cortex-M4F cost to
+		# DWT->CYCCNT (offset 4 in emu_dwt), scaled by the hardware calibration in
+		# emulator/cpu.json (tools/calibrate_cpu.mjs). EMU_CPU_SCALE overrides it.
+		CYC=$OUT/web/wakes-cyc.wasm
+		if [ -n "$EMU_CPU_PROFILE" ]; then
+			CYCARGS="--profile emu_cpu_classes"
+		elif [ -n "$EMU_CPU_SCALE" ]; then
+			CYCARGS="--counter emu_dwt:4 --scale $EMU_CPU_SCALE"
+		else
+			CYCARGS="--counter emu_dwt:4 --model $HERE/cpu.json"
+		fi
+		echo "[web] $(python3 "$HERE/tools/wasm_cycles.py" "$RAW" "$CYC" $CYCARGS)"
+		[ -f "$HERE/cpu.json" ] && cp "$HERE/cpu.json" "$HERE/web/cpu.json"
+		wasm-opt "$CYC" -O2 --asyncify \
 			--pass-arg=asyncify-imports@env.emu_host_switch \
 			--pass-arg='asyncify-removelist@_ZN6plaits*,_ZNK6plaits*,_ZN7marbles*,_ZNK7marbles*,_ZN6stmlib*,_ZNK6stmlib*' \
-			-o "$HERE/web/wakes.wasm"
-		echo "[web] $HERE/web/wakes.wasm ($(wc -c < "$HERE/web/wakes.wasm") bytes)"
+			-o "$WASM_OUT"
+		echo "[web] $WASM_OUT ($(wc -c < "$WASM_OUT") bytes)"
 		# The manual and the reference docs, beside the page (emulator/web/manual/).
 		echo "[web] $(python3 "$HERE/tools/gen_manual.py" "$HERE/web/manual")"
 	fi

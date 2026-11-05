@@ -79,10 +79,10 @@ double emu_run_until_ms(double limit_ms)
 		if (!t) {
 			break;
 		}
-		emu_current = t;
+		emu_run_begin(t);
 		struct arch *a = t->arch;
 		swapcontext(&sched_ctx, &a->ctx);
-		emu_current = NULL;
+		emu_run_end();
 	}
 	return (double)emu_now / (double)EMU_MS;
 }

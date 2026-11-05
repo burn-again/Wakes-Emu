@@ -95,6 +95,53 @@ stream played to the WAV, and exits 3 if the device hit its watchdog, faulted, o
 `node emulator/web/test-node.mjs` runs the wasm build through a full lifecycle (boot,
 drive, TRIG, USB-MIDI, power off, wake, drive read back) and exits non-zero on failure.
 
+## The CPU meter
+
+The browser (and Node) build counts what the code would cost on the SP-1's 64 MHz
+Cortex-M4F. After linking, `tools/wasm_cycles.py` rewrites the WebAssembly so every basic
+block adds its estimated cycles to `DWT->CYCCNT`, the counter Wakes already times its audio
+with. So Wakes' own lines read it: `AUD … cyc avg` (the mean cost of an audio block, the
+figure `docs/PLAITS-ENGINES.md` quotes), `CPU eng= mrb= rte= post= out=` (where the block
+goes) and `THREADS` (each thread's share). The page shows the same as a meter: the share of
+each 2 ms block with its peak, a minute of history with the 85 % and 100 % lines, and how
+the CPU divides between the threads.
+
+**How close it is.** The weights are per instruction (single-precision FPU ops a cycle,
+divide and square root ~14, every `double` operation a software routine, loads 2, stores
+1, taken branches 2, calls ~5), then fitted by `tools/calibrate.sh` to the 13 engines
+Wakes measured on an SP-1 with Marbles running. Measured the way the hardware was:
+
+| engine | SP-1 | meter | | engine | SP-1 | meter |
+|---|---|---|---|---|---|---|
+| wave-terrain | 82.3 | 80.9 | | filtered-noise | 66.1 | 64.0 |
+| virtual-analog | 56.5 | 70.7 | | particle | 47.6 | 46.0 |
+| waveshaping | 55.9 | 60.4 | | string | 71.3 | 69.1 |
+| wavetable | 73.9 | 73.8 | | modal | 73.0 | 57.7 |
+| swarm | 79.5 | 81.6 | | bass-drum | 75.3 | 73.9 |
+| hi-hat | 77.0 | 77.5 | | | | |
+
+That is 6.6 points RMS, and 7.3 on an engine left out of the fit (the honest figure: how
+well it predicts an engine it has not seen); the worst are modal (−15) and virtual analog
+(+14). Two engines are shown but not fitted, because the hardware figure measured a
+different workload: additive changed after that session (M4e, more work per sample), and
+chiptune's 73.7 % fits its five-voice chord mode, which v0.9.0 never selects (it reads
+37 % here). The maths library is charged a fixed cost per call: the wasm build's musl
+computes `powf`/`expf` in double precision, the SP-1's picolibc in single.
+
+So read a figure as ±7 points, and measure on the device before relying on less than
+~15 points of headroom. Code is counted, not timed: interrupts, flash wait states and the
+instruction cache are averaged into the weights. The native harness does not count.
+
+**Re-calibrating**, after a change to the weights or a new hardware table in the docs:
+
+```sh
+sh emulator/tools/calibrate.sh     # profile, fit, check; writes emulator/cpu.json
+sh emulator/build.sh web           # the default build, counting with the new model
+```
+
+It builds the emulator as the measured firmware was (Plaits block 12, 5 ms audio blocks,
+before #32), plays each engine with Marbles running, and reads Wakes' `AUD` line.
+
 ## Test your own change
 
 1. Edit `firmware/src` (or `config/`, or the Plaits overrides) as you would for the device.
@@ -127,10 +174,9 @@ Replaced modules: `sp1_emmc.c` (the bit-banged MMC driver) by `src/emu_emmc.c`,
 
 ## What it cannot tell you
 
-- **CPU.** Running code takes no virtual time, and your computer is far faster than a
-  64 MHz Cortex-M4. A change that plays cleanly here can overrun the 2 ms audio block on
-  the device. Wakes' own CPU lines read 0 % here. Use `tools/plaits-bench` and the
-  device's `CPU` / `AUD` log lines.
+- **CPU, exactly.** The meter (above) estimates it to about ±7 points; running code still
+  takes no virtual time, so an overrun shows on the meter, not as a dropout. Near the
+  limit, measure on the device: its `AUD` / `CPU` lines are the same ones the meter fills.
 - **RAM and stacks.** The device has 256 KB and 3–4 KB thread stacks; the emulator's
   are far larger. Check the real build's size report.
 - **Analog behaviour.** Codec gain staging, the speaker, the headphone jack's detect,
@@ -161,6 +207,9 @@ emulator/
                          manual.json: page titles, and every drawing's names and hotspots
   tools/gen_config.py    emu_autoconf.h + app version from firmware/Kconfig, prj.conf, VERSION
   tools/gen_manual.py    manual pages (PNG), the PDF and the reference docs, into web/manual/
+  tools/wasm_cycles.py   the CPU meter: adds each basic block's estimated M4F cycles to DWT->CYCCNT
+  tools/calibrate.sh     fits its weights to Wakes' hardware measurements (calibrate_cpu.mjs)
+  cpu.json               the fitted model, and how far it is from each hardware figure
 ```
 
 The web build needs clang/lld 18+, a wasm32-wasi sysroot with libc++, and Binaryen's

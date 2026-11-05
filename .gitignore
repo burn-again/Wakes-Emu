@@ -28,3 +28,5 @@ emulator/web/wakes.wasm
 emulator/web/manual/
 # ...but the emulator's stand-in Zephyr headers are source, not a west checkout
 !emulator/include/zephyr/
+
+emulator/web/cpu.json

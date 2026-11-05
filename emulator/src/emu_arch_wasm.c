@@ -61,7 +61,14 @@ EMU_EXPORT struct k_thread *emu_pick(double limit_ms)
 	}
 	return emu_sched_pick((uint64_t)(limit_ms * (double)EMU_MS));
 }
-EMU_EXPORT void      emu_set_current(struct k_thread *t) { emu_current = t; }
+EMU_EXPORT void emu_set_current(struct k_thread *t)
+{
+	if (t) {
+		emu_run_begin(t);
+	} else {
+		emu_run_end();
+	}
+}
 EMU_EXPORT struct k_thread *emu_get_current(void) { return emu_current; }
 EMU_EXPORT int       emu_t_started(struct k_thread *t) { return t->started; }
 EMU_EXPORT void      emu_t_mark_started(struct k_thread *t) { t->started = 1; }

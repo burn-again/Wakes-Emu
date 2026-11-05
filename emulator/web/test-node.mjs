@@ -52,11 +52,19 @@ for (const t of [2600, 3000, 3400]) {
 step(4000);
 check(peak > 0.05, `audio after TRIG (peak ${(20 * Math.log10(peak || 1e-9)).toFixed(1)} dBFS)`);
 
+// The CPU meter: the build counts estimated cycles, and Wakes' own AUD line reads them.
+dev.ex.emu_cpu_window_reset();
+step(4400);
+const blocks = dev.ex.emu_cpu(1);
+const cpuPct = 100 * dev.ex.emu_cpu(0) / blocks / (dev.ex.emu_audio_block_frames() * 64e6 / 48000);
+check(blocks > 100 && cpuPct > 20 && cpuPct < 100, `CPU meter: virtual analog at ${cpuPct.toFixed(1)} % of the audio block`);
+
+
 dev.setUsb(USB.COMPUTER);
-step(4500);
+step(4900);
 peak = 0;
-dev.sendMidi([0x90, 60, 100]); step(4900); dev.sendMidi([0x80, 60, 0]);
-step(5200);
+dev.sendMidi([0x90, 60, 100]); step(5300); dev.sendMidi([0x80, 60, 0]);
+step(5600);
 check(/MIDI port enabled/.test(log), 'USB host: MIDI port enabled');
 check(peak > 0.05, 'audio from a MIDI note');
 dev.setUsb(USB.UNPLUGGED);
@@ -66,6 +74,8 @@ step(10500);
 dev.setFnc(false);
 step(12000);
 check(dev.state === 'off' && STOP_NAME[dev.lastStop] === 'SYSTEM_OFF', `power-off: ${STOP_NAME[dev.lastStop]}`);
+const aud = [...log.matchAll(/cyc avg=([\d.]+)%/g)].map((m) => Number(m[1]));
+check(aud.some((v) => v > 20), `Wakes' own AUD line reads the counted cycles (${aud.at(-1)} %)`);
 
 dev.setFnc(true);
 await dev.service();
