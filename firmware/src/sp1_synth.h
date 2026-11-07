@@ -155,6 +155,10 @@ void sp1_synth_set_reverb(int step);     /* 0 off, 1..4 (experimental, docs/HEAD
 /* The CPU guard has paused it: the engine leaves too little. dry / cost in % of the block. */
 bool sp1_synth_reverb_paused(int *dry_pct, int *cost_pct);
 #endif
+#if defined(CONFIG_SP1_COMB)
+void sp1_synth_set_comb(int mode);       /* 0 off, 1 string, 2 string +19, 3 flanger, 4 chorus */
+bool sp1_synth_comb_paused(int *dry_pct, int *cost_pct);
+#endif
 #if defined(CONFIG_SP1_DRUM)
 uint32_t sp1_synth_drum_hits(void);      /* drum strikes (experimental, docs/DRUMS.md) */
 #endif

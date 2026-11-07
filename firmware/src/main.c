@@ -749,25 +749,52 @@ static void plaits_buttons(bool fnc, bool running, uint32_t dt)
 		}
 	} else {
 		/* ---- SETTINGS: T1 shows the scale, T2 / T3 select it, T4 the output ---- */
-#if defined(CONFIG_SP1_REVERB)
-		/* Experimental (docs/HEADROOM.md): T1 is the reverb here, beside T4's output
-		 * select -- off, 1 .. 4, off (RT60 about 1.8 / 2.3 / 3.8 / 6 s). T2 / T3 still
-		 * show the scale as they step it. */
+#if defined(CONFIG_SP1_REVERB) || defined(CONFIG_SP1_COMB)
+		/* Experimental (docs/HEADROOM.md): T1 steps the effects here, beside T4's output
+		 * select, one at a time -- off, the reverb's four sizes (RT60 about 1.8 / 2.3 /
+		 * 3.8 / 6 s), then the comb's four modes. The reverb's glyph is a bar from T1, the
+		 * comb's a bar from T4. T2 / T3 still show the scale as they step it. */
 		if (!fnc && sp1_button_pressed(SP1_BTN_T1)) {
-			static int reverb;
-			reverb = (reverb + 1) % 5;
-			sp1_synth_set_reverb(reverb);
-			uint8_t bar[4];
-			for (int i = 0; i < 4; i++) {
-				bar[i] = (i < reverb) ? SP1_ENGINE_LED_FULL : 0u;
+			static const struct { int8_t reverb, comb; } fx[] = {
+				{ 0, 0 },
+#if defined(CONFIG_SP1_REVERB)
+				{ 1, 0 }, { 2, 0 }, { 3, 0 }, { 4, 0 },
+#endif
+#if defined(CONFIG_SP1_COMB)
+				{ 0, 1 }, { 0, 2 }, { 0, 3 }, { 0, 4 },
+#endif
+			};
+			static unsigned at;
+			at = (at + 1u) % (sizeof(fx) / sizeof(fx[0]));
+			uint8_t bar[4] = { 0u, 0u, 0u, 0u };
+#if defined(CONFIG_SP1_REVERB)
+			sp1_synth_set_reverb(fx[at].reverb);
+			for (int i = 0; i < fx[at].reverb; i++) {
+				bar[i] = SP1_ENGINE_LED_FULL;
+			}
+			if (fx[at].reverb > 0) {
+				static const char *const rt60[5] = { "", "1.8", "2.3", "3.8", "6" };
+				printk("REVERB %d of 4: RT60 about %s s\n", fx[at].reverb,
+				       rt60[fx[at].reverb]);
+			}
+#endif
+#if defined(CONFIG_SP1_COMB)
+			sp1_synth_set_comb(fx[at].comb);
+			for (int i = 0; i < fx[at].comb; i++) {
+				bar[3 - i] = SP1_ENGINE_LED_FULL;
+			}
+			if (fx[at].comb > 0) {
+				static const char *const name[5] = {
+					"", "string: the voice plucks a string at its own note",
+					"string an octave and a fifth up", "flanger: 2.5 ms swept at 0.2 Hz",
+					"chorus: 9 ms swept at 0.6 Hz" };
+				printk("COMB %s\n", name[fx[at].comb]);
+			}
+#endif
+			if (fx[at].reverb == 0 && fx[at].comb == 0) {
+				printk("FX off\n");
 			}
 			sp1_display_engine(bar);
-			static const char *const rt60[5] = { "", "1.8", "2.3", "3.8", "6" };
-			if (reverb == 0) {
-				printk("REVERB off\n");
-			} else {
-				printk("REVERB %d of 4: RT60 about %s s\n", reverb, rt60[reverb]);
-			}
 		}
 #else
 		if (!fnc && sp1_button_pressed(SP1_BTN_T1)) {
@@ -2365,17 +2392,27 @@ int main(void)
 					static bool rv_was;
 					int dry, cost;
 					const bool rv = sp1_synth_reverb_paused(&dry, &cost);
-					if (rv != rv_was) {
-						rv_was = rv;
-						if (rv) {
-							printk("REVERB paused: this engine uses %d %% of the "
-							       "block, the reverb would add %d %% -- over the "
-							       "limit; another engine or step tries again\n",
-							       dry, cost);
-						} else {
-							printk("REVERB running again\n");
-						}
+					if (rv && !rv_was) {
+						printk("REVERB paused: this engine uses %d %% of the "
+						       "block, the reverb would add %d %% -- over the "
+						       "limit; another engine or setting tries again\n",
+						       dry, cost);
 					}
+					rv_was = rv;
+				}
+#endif
+#if defined(CONFIG_SP1_COMB)
+				{
+					static bool cb_was;
+					int dry, cost;
+					const bool cb = sp1_synth_comb_paused(&dry, &cost);
+					if (cb && !cb_was) {
+						printk("COMB paused: this engine uses %d %% of the "
+						       "block, the comb would add %d %% -- over the "
+						       "limit; another engine or setting tries again\n",
+						       dry, cost);
+					}
+					cb_was = cb;
 				}
 #endif
 #if defined(CONFIG_SP1_MIDIFILE)

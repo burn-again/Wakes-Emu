@@ -165,20 +165,23 @@ rules, the polyphony measurements and the limits.
 
 ## Experimental: reverb and arpeggiator
 
-Two more from the Mutable Instruments line, built on here and off on the device. They come with a
+More from the Mutable Instruments line, built on here and off on the device. They come with a
 survey of what else would fit in the SP-1's CPU and RAM: `docs/HEADROOM.md` (the **Headroom** tab).
 - **Clouds' reverb** (`CONFIG_SP1_REVERB`): PLAITS, double-tap `••` for SETTINGS, **T1** cycles
   off / 1–4. It runs at half rate (~14.6 % of the CPU). A guard pauses it on engines that leave
   too little room (2-op FM, grain-formant, additive) and logs `REVERB paused`.
+- **A tight modulated delay** (`CONFIG_SP1_COMB`), on the same T1 after reverb 4. **string**
+  is Karplus-Strong: the voice plucks a string at its own note. Then **string +19**, **flanger**
+  and **chorus**. About 5 % of the CPU; the guard pauses it only on 2-op FM.
 - **Yarns' arpeggiator** (`CONFIG_SP1_ARP`): MARBLES, double-tap `••` for SETTINGS, **T1**
   cycles off / up / up-down / random / as played. Hold a chord on a MIDI keyboard, or play a MIDI
   file. The step is the burst division (`••` + rocker on PLAITS) on Marbles' clock.
 
-The meter charges Clouds' reverb by an ARM instruction count rather than its wasm translation
-(`FUNC_SCALE` in `tools/wasm_cycles.py`). The wasm version is about twice as long as the
-Cortex-M4 code, and no hardware measurement exists for it to be calibrated against.
+The meter charges Clouds' reverb and the comb by an ARM instruction count rather than their wasm translation
+(`FUNC_SCALE` in `tools/wasm_cycles.py`). Their wasm versions are about twice as long as the
+Cortex-M4 code, and no hardware measurement exists for them to be calibrated against.
 
-`EMU_KCONFIG` sets the Kconfig overrides. Unset, it is `SP1_DRUM=y SP1_MIDIFILE=y SP1_REVERB=y SP1_ARP=y`. Set it empty
+`EMU_KCONFIG` sets the Kconfig overrides. Unset, it is `SP1_DRUM=y SP1_MIDIFILE=y SP1_REVERB=y SP1_ARP=y SP1_COMB=y`. Set it empty
 (`EMU_KCONFIG= sh emulator/build.sh`) to build exactly what `prj.conf` builds, or to
 another list (`EMU_KCONFIG="SP1_DRUM=y SP1_PLAITS_BLOCK=12"`) to combine options.
 `test-node.mjs` runs each experiment's checks only when the build has it.

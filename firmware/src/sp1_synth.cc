@@ -28,6 +28,9 @@
 #include "clouds/dsp/frame.h"            // reverb.h expects FloatFrame first, as Clouds does
 #include "clouds/dsp/fx/reverb.h"
 #endif
+#if defined(CONFIG_SP1_COMB)
+#include "sp1_comb.h"
+#endif
 
 namespace {
 
@@ -53,17 +56,9 @@ plaits::Voice* voice = nullptr;
 // delay lengths for 32 kHz, so the room is a third larger and darker -- a reverb tail has
 // little above 12 kHz anyway, and the loop's own low-pass takes most of it.
 //
-// THE GUARD: no engine-independent budget is left for a fixed cost (2-op FM alone is ~90 %),
-// and an audio thread over budget starves main until the watchdog resets the device. So the
-// reverb only runs while the engine's own load plus the reverb's MEASURED cost stays under
-// kReverbLimit. Over it, the reverb pauses (main logs it) and STAYS paused until the engine
-// or the reverb step changes: an engine's load swings with what it plays, and a guard that
-// let it back in on a quiet moment flapped (tail cut, memory cleared, again). After a
-// change it measures for kReverbSettle blocks before it judges. Off costs nothing at all.
+// The CPU guard (FxGuard, below) decides where it may run. Off costs nothing at all.
 const size_t kReverbDecim = 2;
 static_assert(plaits::kBlockSize % kReverbDecim == 0, "the reverb's half rate needs an even block");
-const float kReverbLimit = 0.90f;            // of the audio block, synth only (AUD reads ~1.5 more)
-const int kReverbSettle = 64;                // blocks (~130 ms at 2 ms blocks)
 const uint32_t kReverbWords = 16384u;
 const uint32_t kReverbClearStep = 2048u;     // cleared over 8 blocks, never 32 KB at once
 uint16_t reverb_memory[kReverbWords];        // 32 KB, Clouds' FxEngine<16384, 12-bit>
@@ -73,12 +68,83 @@ int reverb_step;                             // audio thread: what was applied
 float reverb_amount;                         // our dry/wet, at 48 kHz
 float reverb_prev;                           // the last 24 kHz wet sample (upsampling)
 uint32_t reverb_clear = kReverbWords;        // < kReverbWords: still clearing
-bool reverb_allowed = true;                  // the guard
-float reverb_dry_load = -1.0f;               // smoothed, fractions of the block; < 0: unset
-float reverb_cost = 0.15f;                   // until measured: ~ the ARM count's 12-16 %
-int reverb_settle = kReverbSettle;
-volatile int reverb_paused;                  // published for main's log
-volatile int reverb_dry_pct, reverb_cost_pct;
+#endif
+
+#if defined(CONFIG_SP1_REVERB) || defined(CONFIG_SP1_COMB)
+// ---- the CPU guard for the effects (docs/HEADROOM.md) ----
+// No engine-independent budget is left for a fixed cost (2-op FM alone is ~90 %), and an
+// audio thread over budget starves main until the watchdog resets the device. So an effect
+// only runs while the engine's own load plus the effect's MEASURED cost stays under kFxLimit.
+// Over it, the effect pauses (main logs it) and STAYS paused until the engine or the effect's
+// setting changes: an engine's load swings with what it plays, and a guard that let it back
+// in on a quiet moment flapped (tail cut, memory cleared, again). After a change it measures
+// for kFxSettle blocks before it judges.
+const float kFxLimit = 0.90f;                // of the audio block, synth only (AUD reads ~1.5 more)
+const int kFxSettle = 64;                    // blocks (~130 ms at 2 ms blocks)
+struct FxGuard {
+  bool allowed;
+  float dry;                                 // the engine without the effect; < 0: unset
+  float cost;                                // the effect's own, smoothed
+  int settle;
+  volatile int paused;                       // published for main's log
+  volatile int dry_pct, cost_pct;
+  void Rejudge(bool new_engine) {
+    allowed = true;
+    settle = kFxSettle;
+    paused = 0;
+    if (new_engine) {
+      dry = -1.0f;
+    }
+  }
+  // After the render: its cycles, the effect's, the block's budget, whether it ran.
+  void Update(float total, float own, float budget, bool ran) {
+    const float d = (total - own) / budget;
+    dry = dry < 0.0f ? d : dry + 0.05f * (d - dry);
+    if (ran) {
+      cost += 0.05f * (own / budget - cost);
+    }
+    if (settle > 0) {
+      --settle;
+    } else if (allowed && dry + cost > kFxLimit) {
+      allowed = false;                       // until the engine or the setting changes
+      paused = 1;
+    }
+    dry_pct = static_cast<int>(100.0f * dry + 0.5f);
+    cost_pct = static_cast<int>(100.0f * cost + 0.5f);
+  }
+};
+#endif
+#if defined(CONFIG_SP1_REVERB)
+FxGuard reverb_guard = { true, -1.0f, 0.15f, kFxSettle, 0, 0, 0 };   // cost: ~ its ARM count
+#endif
+
+#if defined(CONFIG_SP1_COMB)
+// ---- the comb (experimental, docs/HEADROOM.md): a tight, modulated delay, audio thread ----
+// sp1_comb.h. Tuned to the note's period and fed back hard it is Karplus-Strong on the voice;
+// a few ms swept, a flanger; ~9 ms, a chorus. ~50-72 Cortex-M4 cycles a sample (clang's ARM
+// code, counted): 3.7-5.4 % of the CPU at 48 kHz, 8 KB. After the voice, before the reverb
+// (were both on), the drive and the limiter.
+struct CombMode {
+  float ratio;                               // x the note's period; 0: `ms` instead
+  float ms;
+  sp1::Comb::Settings s;
+};
+const CombMode kCombModes[5] = {
+  { 0.0f, 0.0f, { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f } },
+  // string: the voice plucks a string at its own note (RT60 ~2 s)
+  { 1.0f, 0.0f, { 0.10f, 0.985f, 0.55f, 0.0015f, 0.40f / 48000.0f, 0.6f } },
+  // string an octave and a fifth up: 2/3 of the period, its second resonance rung by the
+  // voice's third harmonic
+  { 2.0f / 3.0f, 0.0f, { 0.30f, 0.985f, 0.65f, 0.0015f, 0.35f / 48000.0f, 0.6f } },
+  // flanger: 2.5 ms swept +-85 % at 0.2 Hz, feedback 0.7
+  { 0.0f, 2.5f, { 1.0f, 0.70f, 0.85f, 0.85f, 0.20f / 48000.0f, 0.5f } },
+  // chorus: 9 ms swept +-30 % at 0.6 Hz, little feedback
+  { 0.0f, 9.0f, { 1.0f, 0.15f, 0.90f, 0.30f, 0.60f / 48000.0f, 0.45f } },
+};
+sp1::Comb comb;
+volatile int comb_req;                       // main: 0 off, 1..4
+int comb_mode;                               // audio thread: what was applied
+FxGuard comb_guard = { true, -1.0f, 0.05f, kFxSettle, 0, 0, 0 };
 #endif
 
 plaits::Patch patch;
@@ -447,6 +513,22 @@ __attribute__((noinline)) void ReverbBlock(float* v) {
 }
 #endif
 
+#if defined(CONFIG_SP1_COMB)
+// One Plaits block through the comb, in place; `note` is what the voice plays (semitones).
+__attribute__((noinline)) void CombBlock(float* v, float note) {
+  const CombMode& m = kCombModes[comb_mode];
+  const float delay = m.ratio > 0.0f ? m.ratio / plaits::NoteToFrequency(note)
+                                     : m.ms * 48.0f;
+  for (size_t i = 0; i < plaits::kBlockSize; ++i) {
+    v[i] *= kQ15;                        // 16-bit scale -> +-1
+  }
+  comb.Process(v, plaits::kBlockSize, delay, m.s);
+  for (size_t i = 0; i < plaits::kBlockSize; ++i) {
+    v[i] *= 32768.0f;
+  }
+}
+#endif
+
 #if defined(CONFIG_SP1_MIDIFILE)
 void MidiFileEmit(void*, const uint8_t msg[3], uint8_t len) {
   sp1_midi_audio_file(msg, len);
@@ -556,7 +638,7 @@ uint32_t (*midi_clock)(void);                // NULL = untimed (sp1_synth_set_mi
 
 extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
   const uint32_t prof_t0 = Now();
-#if defined(CONFIG_SP1_REVERB)
+#if defined(CONFIG_SP1_REVERB) || defined(CONFIG_SP1_COMB)
   const uint32_t frames_in = frames;
 #endif
   const uint32_t miss_t0 = Miss();
@@ -629,9 +711,7 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
         reverb_prev = 0.0f;
       }
       reverb_step = rq;
-      reverb_allowed = true;           // a new step: judge again
-      reverb_settle = kReverbSettle;
-      reverb_paused = 0;
+      reverb_guard.Rejudge(false);     // a new step: judge again
       // Four steps from the decay measured at 24 kHz (tone bursts, docs/HEADROOM.md):
       // RT60 at 1 kHz about 1.8 / 2.3 / 3.8 / 6.3 s -- at half rate Clouds' network does not
       // go much shorter than 1.6 s. Low notes ring a little longer, highs shorter (the loop's
@@ -653,17 +733,34 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     }
   }
   if (engine_changed && reverb_step > 0) {
-    if (!reverb_allowed) {
+    if (!reverb_guard.allowed) {
       reverb_clear = 0u;               // a new engine: judge again, from a clean memory
       reverb_prev = 0.0f;
     }
-    reverb_allowed = true;
-    reverb_settle = kReverbSettle;
-    reverb_dry_load = -1.0f;
-    reverb_paused = 0;
+    reverb_guard.Rejudge(true);
   }
-  const bool reverb_on = reverb_step > 0 && reverb_allowed && reverb_clear >= kReverbWords;
+  const bool reverb_on = reverb_step > 0 && reverb_guard.allowed && reverb_clear >= kReverbWords;
   uint32_t reverb_cycles = 0u;
+#endif
+#if defined(CONFIG_SP1_COMB)
+  {
+    const int rq = comb_req;
+    if (rq != comb_mode) {
+      if (comb_mode == 0) {
+        comb.Init();                   // from off: an empty line (8 KB, once)
+      }
+      comb_mode = rq;
+      comb_guard.Rejudge(false);
+    }
+    if (engine_changed && comb_mode > 0) {
+      if (!comb_guard.allowed) {
+        comb.Init();
+      }
+      comb_guard.Rejudge(true);
+    }
+  }
+  const bool comb_on = comb_mode > 0 && comb_guard.allowed;
+  uint32_t comb_cycles = 0u;
 #endif
 
   bool pulse_started = false;          // a new RWD / burst TRIG this audio block
@@ -1068,6 +1165,13 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
       sp1_midi_audio_lpg(voice->sp1_lpg_gain(), voice->sp1_lpg_bypassed());
     }
 #endif
+#if defined(CONFIG_SP1_COMB)
+    if (comb_on) {
+      const uint32_t cb0 = Now();
+      CombBlock(v, render_patch->note + mods.note);
+      comb_cycles += Now() - cb0;
+    }
+#endif
 #if defined(CONFIG_SP1_REVERB)
     if (reverb_on) {
       const uint32_t rv0 = Now();
@@ -1089,24 +1193,21 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     frames -= plaits::kBlockSize;
   }
   output_prev = omode;
-#if defined(CONFIG_SP1_REVERB)
-  // ---- the guard (above): the engine's load without the reverb, and the reverb's own ----
-  if (cyc_counter && reverb_step > 0) {
+#if defined(CONFIG_SP1_REVERB) || defined(CONFIG_SP1_COMB)
+  // ---- the guards (above): the engine's load without each effect, and the effect's own ----
+  if (cyc_counter) {
     const float budget = static_cast<float>(frames_in) * (64.0e6f / 48000.0f);
     const float total = static_cast<float>(Now() - prof_t0);
-    const float dry = (total - static_cast<float>(reverb_cycles)) / budget;
-    reverb_dry_load = reverb_dry_load < 0.0f ? dry : reverb_dry_load + 0.05f * (dry - reverb_dry_load);
-    if (reverb_on) {
-      reverb_cost += 0.05f * (static_cast<float>(reverb_cycles) / budget - reverb_cost);
+#if defined(CONFIG_SP1_REVERB)
+    if (reverb_step > 0) {
+      reverb_guard.Update(total, static_cast<float>(reverb_cycles), budget, reverb_on);
     }
-    if (reverb_settle > 0) {
-      --reverb_settle;
-    } else if (reverb_allowed && reverb_dry_load + reverb_cost > kReverbLimit) {
-      reverb_allowed = false;            // until the engine or the step changes
-      reverb_paused = 1;
+#endif
+#if defined(CONFIG_SP1_COMB)
+    if (comb_mode > 0) {
+      comb_guard.Update(total, static_cast<float>(comb_cycles), budget, comb_on);
     }
-    reverb_dry_pct = static_cast<int>(100.0f * reverb_dry_load + 0.5f);
-    reverb_cost_pct = static_cast<int>(100.0f * reverb_cost + 0.5f);
+#endif
   }
 #endif
   prof.eng = prof_eng;
@@ -1194,9 +1295,21 @@ extern "C" void sp1_synth_set_reverb(int step) {
 }
 
 extern "C" bool sp1_synth_reverb_paused(int* dry_pct, int* cost_pct) {
-  *dry_pct = reverb_dry_pct;
-  *cost_pct = reverb_cost_pct;
-  return reverb_paused != 0 && reverb_req > 0;
+  *dry_pct = reverb_guard.dry_pct;
+  *cost_pct = reverb_guard.cost_pct;
+  return reverb_guard.paused != 0 && reverb_req > 0;
+}
+#endif
+
+#if defined(CONFIG_SP1_COMB)
+extern "C" void sp1_synth_set_comb(int mode) {
+  comb_req = mode < 0 ? 0 : (mode > 4 ? 4 : mode);
+}
+
+extern "C" bool sp1_synth_comb_paused(int* dry_pct, int* cost_pct) {
+  *dry_pct = comb_guard.dry_pct;
+  *cost_pct = comb_guard.cost_pct;
+  return comb_guard.paused != 0 && comb_req > 0;
 }
 #endif
 

@@ -299,6 +299,20 @@ config SP1_ARP
 	  phase-locked while it runs and free at its tempo while stopped. No measurable CPU.
 	  docs/HEADROOM.md. The emulator builds it on.
 
+config SP1_COMB
+	bool "Experimental: a tight modulated delay -- Karplus-Strong on the voice"
+	default n
+	depends on SP1_PLAITS
+	help
+	  One short delay line with feedback, a damping low-pass and a slow sine on its
+	  length (sp1_comb.h), after the voice. Tuned to the note's period it is a
+	  Karplus-Strong string the voice plucks at its own pitch (or an octave and a
+	  fifth up); a few
+	  milliseconds swept, a flanger; ~9 ms, a chorus. About 4-5 % of the CPU and 8 KB.
+	  It joins the reverb on PLAITS SETTINGS T1 (off, reverb 1-4, string, string +19,
+	  flanger, chorus); the same CPU guard pauses it where the engine leaves too little.
+	  docs/HEADROOM.md. The emulator builds it on.
+
 config SP1_STRING_VOICES
 	int "String engine: number of strings (Plaits kNumStrings)"
 	range 1 3

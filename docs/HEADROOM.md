@@ -1,12 +1,13 @@
 # Headroom: what else from Mutable Instruments fits on the SP-1
 
 A survey of the Mutable Instruments line against the SP-1's budget: a 64 MHz Cortex-M4F, 256 KB
-of RAM and one mono voice at 48 kHz. Two of the ideas are built as experiments:
+of RAM and one mono voice at 48 kHz. Three of the ideas are built as experiments:
 
 - **Clouds' reverb** (`CONFIG_SP1_REVERB`)
+- **A tight modulated delay, Karplus-Strong on the voice** (`CONFIG_SP1_COMB`)
 - **Yarns' arpeggiator** (`CONFIG_SP1_ARP`)
 
-Both are off in device builds and on in the emulator. Nothing here has run on hardware.
+All three are off in device builds and on in the emulator. Nothing here has run on hardware.
 
 ---
 
@@ -75,6 +76,7 @@ size in the source and an operation count; check them the way the reverb was che
 | idea (module) | what it would do on the SP-1 | CPU | RAM | fit |
 |---|---|---|---|---|
 | **Reverb** (Clouds; Rings and Elements have the same one) | a tail after the voice | **14.6 %** at half rate (measured: ARM count and meter) | **32 KB** | ✅ **prototyped**. Runs on 13 of 16 engines; a guard pauses it on 2-op FM, grain-formant and additive |
+| **Comb: a tight modulated delay** (Karplus-Strong, as in Plaits' and Rings' strings; flanger, chorus) | the voice plucks a string at its own note; or a flanger / chorus | **5.2 %** (measured: ARM count and meter) | **8 KB** | ✅ **prototyped**. Runs on 15 of 16 engines; the guard pauses it on 2-op FM only |
 | **Arpeggiator** (Yarns) | held MIDI chords → patterns on Marbles' clock | **0.2 %** (measured) | < 0.1 KB | ✅ **prototyped** |
 | Diffuser (Clouds) | smear / pseudo-reverb, much lighter | ~3–4 % at 24 kHz | 4 KB (16-bit) | likely fits on every engine but FM; mono |
 | Chorus / ensemble (Rings) | stereo width for the mono voice | ~3–5 % / ~6–9 % | 4 / 8 KB | fits, but needs a **stereo audio path**: today the synth renders mono and `sp1_audio.c` copies it to both sides, and USB audio would follow |
@@ -99,8 +101,9 @@ spare.
 
 ## Prototype 1: Clouds' reverb (`CONFIG_SP1_REVERB`)
 
-**Use it:** PLAITS, double-tap `••` for SETTINGS, then **T1** cycles **off → 1 → 2 → 3 → 4 →
-off**. The model row shows a bar; tap `••` once to leave. This replaces T1's "show the scale" on
+**Use it:** PLAITS, double-tap `••` for SETTINGS, then **T1** steps **off → reverb 1 → 2 → 3 →
+4 →** the comb's four modes (prototype 3) **→ off**, one effect at a time. The reverb shows a bar
+from T1, the comb a bar from T4; tap `••` once to leave. This replaces T1's "show the scale" on
 that page; T2 and T3 still show the scale as they step it.
 
 | step | RT60 at 1 kHz | wet |
@@ -170,6 +173,52 @@ the ARM midpoint.
 
 ---
 
+## Prototype 3: a tight modulated delay — Karplus-Strong on the voice (`CONFIG_SP1_COMB`)
+
+One short delay line with feedback, a one-pole low-pass in the loop and a slow sine on its
+length (`firmware/src/sp1_comb.h`, ours). Tuned to the period of the note the voice plays and
+fed back hard, it is Karplus-Strong: the voice becomes the pluck of a string at its own pitch,
+the way Plaits' string engine and Rings excite theirs. Short and swept, it is a flanger.
+
+**Use it:** the same T1 ring as the reverb (PLAITS SETTINGS), after reverb 4:
+
+| mode | what it is | settings |
+|---|---|---|
+| **string** | Karplus-Strong at the note: the voice rings on as a string, RT60 ~2 s on a low note, shorter up high as a real string's is | delay = the note's period, feedback 0.985, damping 0.55, input 0.10, 60 % wet |
+| **string +19** | 2/3 of the period: its second resonance, an octave and a fifth up, rung by the voice's third harmonic | feedback 0.985, damping 0.65, input 0.30 |
+| **flanger** | 2.5 ms swept ±85 % at 0.2 Hz | feedback 0.7 |
+| **chorus** | 9 ms swept ±30 % at 0.6 Hz | feedback 0.15 |
+
+It follows the voice's pitch: `patch.note` plus Marbles' V/Oct and MIDI pitch, block by block,
+so a new note retunes the string within one Plaits block (0.5 ms). The drum hits tune it to the
+drum. The loop low-pass delays low frequencies by (1 − a) / a samples, and that is taken off the
+delay so the string is in tune: a 138 Hz note leaves a 138 Hz tail, and a 279 Hz note a 277 Hz
+tail. A clamp in the loop keeps a held, exactly-tuned note from running away.
+
+Measured in the device, three notes struck with RWD, level 1.0–1.1 s after each strike:
+
+| | 138 Hz note | 277 Hz note |
+|---|---|---|
+| dry | −61.0 dBFS | −68.8 dBFS |
+| string | **−39.2** (tail at 138 Hz) | **−52.9** (tail at 277 Hz) |
+| string +19 | −52.1 (tail at 414 Hz) | −66.2 |
+
+Flanger and chorus change the tone, not the tail.
+
+**Cost:** about **5.2 %** of the CPU on every engine, and 8 KB. The guard pauses it on 2-op FM
+only (on 90 % already), so it runs on 15 of 16 engines; the reverb runs on 13. The clang ARM
+count of its loop (unrolled two samples a pass) is ~50–72 cycles a sample, plus ~5 for the
+wrapper's scaling: **4.1–5.8 %** at 48 kHz. Copying the settings into locals before the loop
+saved a quarter of it, because the compiler could not prove the output buffer does not alias
+them. The meter counted 10 %, the same wasm overcount the reverb had, so it gets the same ARM
+correction (`FUNC_SCALE`, 0.50).
+
+What it is not: Plaits' own string engine (dispersion, a non-linear bridge, three strings).
+That costs about what the reverb does. This is the lean version of the same idea: one string,
+with the voice as its exciter.
+
+---
+
 ## Prototype 2: Yarns' arpeggiator (`CONFIG_SP1_ARP`)
 
 **Use it:** MARBLES, double-tap `••` for SETTINGS, then **T1** cycles **off → up → up-down →
@@ -198,8 +247,10 @@ second at 120 BPM).
 
 ## What is next
 
-- The real RAM and flash figures from a device build's size report, then a hardware run of both
+- The real RAM and flash figures from a device build's size report, then a hardware run of the
   prototypes. The guard's decisions there come from the real cycle counter.
+- **For the comb:** its feedback and damping on faders (string length and brightness), other
+  intervals, and the comb and reverb together (comb into reverb is about 20 % on light engines).
 - **For the reverb:** a pre-delay or a damping control; and Clouds' diffuser as a lighter option
   for the engines the guard pauses.
 - **For the arp:** octave range, gate length and pattern as `midi.cnfg` keys, and Yarns'

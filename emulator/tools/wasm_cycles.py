@@ -107,6 +107,11 @@ FUNC_SCALE = [
     # output sample at half rate (12-16.5 % of the CPU); counted here: 28.9 %.
     ('clouds::Reverb::Process(', 0.50, 'Clouds reverb, ARM count, docs/HEADROOM.md'),
     ('ReverbBlock(', 0.50, 'its two resampling loops, the same count'),
+    # The comb (CONFIG_SP1_COMB): a fractional delay read, index masks, clamps and a
+    # float -> int conversion a sample. ARM: ~55-77 cycles a sample with its wrapper's two
+    # scaling loops (4.1-5.8 % of the CPU); counted here: 10.0 %.
+    ('sp1::Comb::Process(', 0.50, 'the comb, ARM count, docs/HEADROOM.md'),
+    ('CombBlock(', 0.50, 'its two scaling loops, the same count'),
 ]
 
 

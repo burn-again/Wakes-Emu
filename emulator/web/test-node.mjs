@@ -198,26 +198,52 @@ const rms = (from, to) => {                                       // the output'
 };
 const since = () => log.slice(log.lastIndexOf('=== Wakes v0.9.0 ==='));
 
-// Reverb (CONFIG_SP1_REVERB): PLAITS SETTINGS T1. A strike's tail, dry and then with step 3;
-// then 2-op FM with the clock running, which leaves too little CPU: the guard pauses it.
+// The effects on PLAITS SETTINGS T1, one at a time: off, reverb 1-4, comb 1-4. `fxTo` steps
+// T1 until the log names the one wanted.
+const lastFx = () => ((since().match(/^(REVERB \d of 4|COMB [a-z]+|FX off)/gm) || []).at(-1) || '');
+const fxTo = (want, t) => {
+	for (let k = 0; k < 10 && lastFx() !== want; k++) { tap(BTN.T1, t); t += 180; step(t); }
+	return t;
+};
+
+// Reverb (CONFIG_SP1_REVERB): a strike's tail, dry and then with step 3; then 2-op FM with the
+// clock running, which leaves too little CPU: the guard pauses it.
 await freshBoot();
-settings(2600); tap(BTN.T1, 3100); tap(BTN.T1, 3300); fncTap(3600);
-if (/REVERB 2 of 4/.test(since())) {
-	settings(4000); tap(BTN.T1, 4400); tap(BTN.T1, 4600); tap(BTN.T1, 4800); fncTap(5100);   // 3, 4, off
-	tap(BTN.RWD, 5600);
-	const dry = rms(6600, 7400);
-	settings(9000); tap(BTN.T1, 9400); tap(BTN.T1, 9600); tap(BTN.T1, 9800); fncTap(10100);   // 3
-	tap(BTN.RWD, 10600);
-	const wet = rms(11600, 12400);
+settings(2600); tap(BTN.T1, 3100); fncTap(3400);
+if (/REVERB 1 of 4/.test(since())) {
+	settings(3800); let t = fxTo('FX off', 4200); fncTap(t + 100);
+	tap(BTN.RWD, t + 600);
+	const dry = rms(t + 1600, t + 2400);
+	settings(t + 3000); t = fxTo('REVERB 3 of 4', t + 3400); fncTap(t + 100);
+	tap(BTN.RWD, t + 600);
+	const wet = rms(t + 1600, t + 2400);
 	check(wet > dry + 6, `reverb: step 3 lifts the tail 1-1.8 s after a strike (${dry.toFixed(1)} -> ${wet.toFixed(1)} dBFS)`);
-	tap(BTN.T3, 12600); tap(BTN.T3, 12800);                                                     // 2-op FM
-	tap(BTN.PLAY, 13200);
-	step(16000);
+	t += 2600;
+	tap(BTN.T3, t); tap(BTN.T3, t + 200);                                                       // 2-op FM
+	tap(BTN.PLAY, t + 600);
+	step(t + 3400);
 	check(/ENGINE [^\n]*2-op-FM/.test(since()) && /REVERB paused/.test(since()),
 		'reverb: the CPU guard pauses it on 2-op FM with the clock running');
-	tap(BTN.PLAY, 16200);
+	tap(BTN.PLAY, t + 3600);
 } else {
 	console.log('skip  reverb: this build has no CONFIG_SP1_REVERB');
+}
+
+// Comb (CONFIG_SP1_COMB): "string", Karplus-Strong at the note -- a strike's tail against dry.
+await freshBoot();
+tap(BTN.RWD, 2600);
+const combDry = rms(3600, 4400);
+settings(5000);
+{
+	const t = fxTo('COMB string', 5400);
+	fncTap(t + 100);
+	if (lastFx() === 'COMB string') {
+		tap(BTN.RWD, t + 600);
+		const wet = rms(t + 1600, t + 2400);
+		check(wet > combDry + 10, `comb: "string" rings on 1-1.8 s after a strike (${combDry.toFixed(1)} -> ${wet.toFixed(1)} dBFS)`);
+	} else {
+		console.log('skip  comb: this build has no CONFIG_SP1_COMB');
+	}
 }
 
 // Arpeggiator (CONFIG_SP1_ARP): MARBLES SETTINGS T1, a chord held over USB-MIDI, the clock
