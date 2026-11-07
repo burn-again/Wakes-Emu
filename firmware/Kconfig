@@ -274,6 +274,31 @@ config SP1_MIDIFILE_MAX_KB
 	range 4 64
 	depends on SP1_MIDIFILE
 
+config SP1_REVERB
+	bool "Experimental: Clouds' reverb after the voice"
+	default n
+	depends on SP1_PLAITS
+	help
+	  Mutable Instruments Clouds' reverb (Griesinger topology, 12-bit delay memory,
+	  32 KB of RAM), mono in, after the voice and before the drive and the limiter.
+	  PLAITS SETTINGS T1 cycles it off / 1 / 2 / 3 / 4 (RT60 about 1.8 / 2.3 / 3.8 /
+	  6 s) in place of showing the scale. It runs at 24 kHz, about 11-15 % of the CPU
+	  on top of the engine, and a guard pauses it while the engine leaves too little
+	  (2-op FM, swarm, ...). Off, it costs nothing. docs/HEADROOM.md has the
+	  measurements. The emulator builds it on.
+
+config SP1_ARP
+	bool "Experimental: an arpeggiator on the MIDI notes (Yarns)"
+	default n
+	depends on SP1_MIDI
+	help
+	  Yarns' arpeggiator (part.cc ClockArpeggiator) between the MIDI notes -- USB or a
+	  MIDI file -- and the voice: held keys become a pattern, one note per step, half a
+	  step long. MARBLES SETTINGS T1 (unbound, reserved upstream) cycles off / up /
+	  up-down / random / as played. The step is the burst division on Marbles' clock,
+	  phase-locked while it runs and free at its tempo while stopped. No measurable CPU.
+	  docs/HEADROOM.md. The emulator builds it on.
+
 config SP1_STRING_VOICES
 	int "String engine: number of strings (Plaits kNumStrings)"
 	range 1 3

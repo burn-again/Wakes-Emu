@@ -170,6 +170,74 @@ if (dev.drive.has('/WAKES/MIDI/1')) {
 	console.log('skip  MIDI files: this build has no CONFIG_SP1_MIDIFILE');
 }
 
+// ---- the experiments in docs/HEADROOM.md: a fresh ON for each ----
+const freshBoot = async () => {
+	if (dev.state === 'on') {
+		step(dev.nowMs() + 600);           // a button just before "••" cancels the power-off
+		dev.setFnc(true);
+		step(dev.nowMs() + 5500);          // the 3 s gesture and the save
+		dev.setFnc(false);                 // SYSTEM_OFF waits for the release
+		step(dev.nowMs() + 10000);         // returns once it is off
+	}
+	dev.setFnc(true);
+	await dev.service();
+	step(2000);
+	dev.setFnc(false);
+	step(2500);
+};
+const fncTap = (t) => { step(t); dev.setFnc(true); step(t + 80); dev.setFnc(false); };
+const settings = (t) => { fncTap(t); fncTap(t + 200); };          // "••" double-tap
+const rms = (from, to) => {                                       // the output's level, dBFS
+	step(from);
+	let e = 0, n = 0;
+	while (dev.state === 'on' && dev.nowMs() < to) {
+		dev.runUntil(Math.min(to, dev.nowMs() + 10));
+		for (const x of dev.readAudio().left) { e += x * x; n++; }
+	}
+	return 10 * Math.log10(e / Math.max(n, 1) + 1e-12);
+};
+const since = () => log.slice(log.lastIndexOf('=== Wakes v0.9.0 ==='));
+
+// Reverb (CONFIG_SP1_REVERB): PLAITS SETTINGS T1. A strike's tail, dry and then with step 3;
+// then 2-op FM with the clock running, which leaves too little CPU: the guard pauses it.
+await freshBoot();
+settings(2600); tap(BTN.T1, 3100); tap(BTN.T1, 3300); fncTap(3600);
+if (/REVERB 2 of 4/.test(since())) {
+	settings(4000); tap(BTN.T1, 4400); tap(BTN.T1, 4600); tap(BTN.T1, 4800); fncTap(5100);   // 3, 4, off
+	tap(BTN.RWD, 5600);
+	const dry = rms(6600, 7400);
+	settings(9000); tap(BTN.T1, 9400); tap(BTN.T1, 9600); tap(BTN.T1, 9800); fncTap(10100);   // 3
+	tap(BTN.RWD, 10600);
+	const wet = rms(11600, 12400);
+	check(wet > dry + 6, `reverb: step 3 lifts the tail 1-1.8 s after a strike (${dry.toFixed(1)} -> ${wet.toFixed(1)} dBFS)`);
+	tap(BTN.T3, 12600); tap(BTN.T3, 12800);                                                     // 2-op FM
+	tap(BTN.PLAY, 13200);
+	step(16000);
+	check(/ENGINE [^\n]*2-op-FM/.test(since()) && /REVERB paused/.test(since()),
+		'reverb: the CPU guard pauses it on 2-op FM with the clock running');
+	tap(BTN.PLAY, 16200);
+} else {
+	console.log('skip  reverb: this build has no CONFIG_SP1_REVERB');
+}
+
+// Arpeggiator (CONFIG_SP1_ARP): MARBLES SETTINGS T1, a chord held over USB-MIDI, the clock
+// stopped (free at 120 BPM, 1/32): a stream of strikes, one per step.
+await freshBoot();
+dev.setUsb(USB.COMPUTER);
+step(3000);
+tap(BTN.T4, 3200); settings(3500); tap(BTN.T1, 4000); fncTap(4300);
+if (/ARP up/.test(since())) {
+	step(4800);
+	dev.sendMidi([0x90, 60, 100, 0x90, 64, 100, 0x90, 67, 100]);
+	step(10000);
+	const trig = [...since().matchAll(/ trig=(\d+)/g)].map((m) => Number(m[1]));
+	check(trig.some((n) => n >= 25), `arp: a held chord becomes a stream of notes (${trig.at(-1)} strikes in the last AUD window)`);
+	dev.sendMidi([0x80, 60, 0, 0x80, 64, 0, 0x80, 67, 0]);
+} else {
+	console.log('skip  arp: this build has no CONFIG_SP1_ARP');
+}
+dev.setUsb(USB.UNPLUGGED);
+
 const secs = (performance.now() - t0) / 1000;
 console.log(`\n${frames} frames of audio (${(frames / 48000).toFixed(1)} s of device time) ` +
 	`in ${secs.toFixed(2)} s wall (${(frames / 48000 / secs).toFixed(1)}x real time)`);

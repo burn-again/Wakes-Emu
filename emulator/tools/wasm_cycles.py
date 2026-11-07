@@ -96,6 +96,19 @@ LIBM_CALL = {
 }
 LIBM_QUIET = ('__math_', '__expo2f', '__sindf', '__cosdf', '__tandf', '__rem_pio2f')
 
+# Functions whose wasm translation is known to be much longer than their Cortex-M4 code, and
+# which the hardware table cannot calibrate (no engine runs them): their counted cycles are
+# scaled by an ARM instruction count of the same code (clang --target=thumbv7em-none-eabihf
+# -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -O2, loops counted, 1-4 cycles per instruction by kind).
+# (substring of the function's name, factor, why). The name section holds demangled names.
+FUNC_SCALE = [
+    # Clouds' reverb (CONFIG_SP1_REVERB): 16-bit loads, saturations and int <-> float
+    # conversions, one instruction each on ARM, several in wasm. ARM: ~165-220 cycles per
+    # output sample at half rate (12-16.5 % of the CPU); counted here: 28.9 %.
+    ('clouds::Reverb::Process(', 0.50, 'Clouds reverb, ARM count, docs/HEADROOM.md'),
+    ('ReverbBlock(', 0.50, 'its two resampling loops, the same count'),
+]
+
 
 # Kinds of work, each with its own weight in the calibrated model (cpu.json "classes"):
 # float maths, memory, integer, control flow, the maths library.
@@ -442,7 +455,7 @@ def main():
             '%s=%.3f' % (n, m) for n, m in zip(CLASS_NAMES, cfg['mult'])))
     names, imported = function_names(mod)
     out = bytearray(mod[:8])
-    nblocks = nupd = nfun = nfixed = 0
+    nblocks = nupd = nfun = nfixed = nscaled = 0
     for sid, payload, raw in sections(mod):
         if sid != 10:
             out.extend(raw)
@@ -453,10 +466,16 @@ def main():
             size, i = uleb(payload, i)
             name = names.get(imported + k, '')
             fixed = LIBM_CALL.get(name)
+            fcfg = cfg
+            if 'mult' in cfg:
+                f = next((f for sub, f, _ in FUNC_SCALE if sub in name), None)
+                if f is not None:
+                    fcfg = dict(cfg, mult=[m * f for m in cfg['mult']])
+                    nscaled += 1
             if fixed is None and name.startswith(LIBM_QUIET):
                 fixed = 0
             nfixed += fixed is not None
-            body, blocks, upd = instrument_body(payload[i:i + size], cfg, fixed)
+            body, blocks, upd = instrument_body(payload[i:i + size], fcfg, fixed)
             i += size
             code.extend(enc_uleb(len(body)) + body)
             nblocks += blocks
@@ -467,8 +486,8 @@ def main():
     open(a.dst, 'wb').write(out)
     if not names:
         print('wasm_cycles: no name section; libm calls are counted as compiled', file=sys.stderr)
-    print('cycles: %d functions (%d maths-library at a fixed cost), %d basic blocks, '
-          '%d counter updates; %s' % (nfun, nfixed, nblocks, nupd, desc))
+    print('cycles: %d functions (%d maths-library at a fixed cost, %d scaled by an ARM count), '
+          '%d basic blocks, %d counter updates; %s' % (nfun, nfixed, nscaled, nblocks, nupd, desc))
 
 
 if __name__ == '__main__':

@@ -749,12 +749,34 @@ static void plaits_buttons(bool fnc, bool running, uint32_t dt)
 		}
 	} else {
 		/* ---- SETTINGS: T1 shows the scale, T2 / T3 select it, T4 the output ---- */
+#if defined(CONFIG_SP1_REVERB)
+		/* Experimental (docs/HEADROOM.md): T1 is the reverb here, beside T4's output
+		 * select -- off, 1 .. 4, off (RT60 about 1.8 / 2.3 / 3.8 / 6 s). T2 / T3 still
+		 * show the scale as they step it. */
+		if (!fnc && sp1_button_pressed(SP1_BTN_T1)) {
+			static int reverb;
+			reverb = (reverb + 1) % 5;
+			sp1_synth_set_reverb(reverb);
+			uint8_t bar[4];
+			for (int i = 0; i < 4; i++) {
+				bar[i] = (i < reverb) ? SP1_ENGINE_LED_FULL : 0u;
+			}
+			sp1_display_engine(bar);
+			static const char *const rt60[5] = { "", "1.8", "2.3", "3.8", "6" };
+			if (reverb == 0) {
+				printk("REVERB off\n");
+			} else {
+				printk("REVERB %d of 4: RT60 about %s s\n", reverb, rt60[reverb]);
+			}
+		}
+#else
 		if (!fnc && sp1_button_pressed(SP1_BTN_T1)) {
 			uint8_t slv[4];
 			plaits_scale_glyph(slv);
 			sp1_display_engine(slv);
 			printk("QUANTIZE %s  [shown]\n", plaits_scale_name());
 		}
+#endif
 		if (step != 0) {
 			plaits_scale_step(step);
 		}
@@ -974,6 +996,29 @@ static void marbles_buttons(bool fnc, uint32_t dt)
 	}
 
 	if (sp1_mui_settings()) {
+#if defined(CONFIG_SP1_ARP)
+		/* Experimental (docs/HEADROOM.md): T1 -- free, and reserved upstream -- cycles
+		 * the arpeggiator: off, up, up-down, random, as played. Its step is the burst
+		 * division ("••" + rocker on PLAITS) on this module's clock. */
+		if (sp1_button_pressed(SP1_BTN_T1)) {
+			static const char *const arp_name[5] = { "off", "up", "up-down", "random",
+								 "as played" };
+			static int arp;
+			arp = (arp + 1) % 5;
+			sp1_midi_set_arp(arp);
+			lv[0] = lv[1] = lv[2] = lv[3] = 0u;
+			if (arp > 0) {
+				lv[arp - 1] = SP1_ENGINE_LED_FULL;
+			}
+			sp1_display_engine(lv);
+			if (arp == 0) {
+				printk("ARP off\n");
+			} else {
+				printk("ARP %s: a step every 1/%u, notes half a step long\n",
+				       arp_name[arp], 1u << g_burst_div);
+			}
+		}
+#endif
 		/* ---- SETTINGS: T1 free, T2 = [F], T3 = [G], T4 = [J] for X AND Y ----
 		 * ⚠️ T1 was Y's destination until M4e; it moved to "••" + T4 on the t and X
 		 * pages, beside the other six destination buttons where it belongs. T1 is
@@ -2315,6 +2360,24 @@ int main(void)
 				midi_tick(dt, shutdown_active || rip_ms > 0u || prst_showing ||
 					  unpatch_ms >= SP1_UNPATCH_START_MS);
 				sp1_midi_main_tick(dt);
+#if defined(CONFIG_SP1_REVERB)
+				{
+					static bool rv_was;
+					int dry, cost;
+					const bool rv = sp1_synth_reverb_paused(&dry, &cost);
+					if (rv != rv_was) {
+						rv_was = rv;
+						if (rv) {
+							printk("REVERB paused: this engine uses %d %% of the "
+							       "block, the reverb would add %d %% -- over the "
+							       "limit; another engine or step tries again\n",
+							       dry, cost);
+						} else {
+							printk("REVERB running again\n");
+						}
+					}
+				}
+#endif
 #if defined(CONFIG_SP1_MIDIFILE)
 				sp1_mf_main_tick(sp1_store_midi_load);
 				if (!sp1_button_held(SP1_BTN_RWD)) {

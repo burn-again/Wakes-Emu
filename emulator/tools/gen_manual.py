@@ -26,6 +26,7 @@ DOCS = [
     ('MIDI.md', 'MIDI'),
     ('DRUMS.md', 'Drums'),
     ('MIDIFILE.md', 'MIDI files'),
+    ('HEADROOM.md', 'Headroom'),
     ('DEFAULTS.md', 'Defaults'),
     ('SAFETY.md', 'Safety'),
 ]

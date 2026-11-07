@@ -380,6 +380,10 @@ With the experimental `CONFIG_SP1_MIDIFILE` (also off on the device, on in the e
 down + T1–T4** picks a MIDI file from `WAKES/MIDI/1` … `4`, and MARBLES' rocker-down range step
 moves to its release: `docs/MIDIFILE.md`.
 
+With `CONFIG_SP1_REVERB`, **PLAITS SETTINGS T1** cycles a reverb (off / 1–4) instead of showing the
+scale; with `CONFIG_SP1_ARP`, **MARBLES SETTINGS T1** cycles an arpeggiator (off / up / up-down /
+random / as played). Both experimental, on in the emulator: `docs/HEADROOM.md`.
+
 Destination glyphs — **note the identical glyphs between TRIG and V/Oct, it is intentional**
 
 | destination | on t1–t3 | on X1–X3 / Y |

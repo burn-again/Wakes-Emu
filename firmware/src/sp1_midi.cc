@@ -71,6 +71,34 @@ uint32_t file_n, file_next;
 bool file_live;
 volatile uint32_t file_dropped;
 #endif
+
+#if defined(CONFIG_SP1_ARP)
+// ---- the arpeggiator (experimental, docs/HEADROOM.md), audio thread ----
+// While it is on, every note-on / note-off -- USB or a MIDI file -- goes to `arp_keys`
+// instead of the voice, and the arpeggiator plays the voice through NoteOn / NoteOff, so
+// priority, legato and glide stay the script's. Its step is the burst division on Marbles'
+// clock (phase-locked to the master ramp while the clock runs, free at the same tempo while
+// it is stopped); each note is held for half a step. The stepping is Yarns' -- part.cc,
+// Part::ClockArpeggiator, at the eurorack commit in third_party/eurorack/README.md (MIT) --
+// without its rhythmic patterns, euclidean mode and chord direction.
+enum { ARP_OFF = 0, ARP_UP, ARP_UP_DOWN, ARP_RANDOM, ARP_AS_PLAYED, ARP_MODES };
+stmlib::NoteStack<kStackSize> arp_keys;
+volatile int arp_req;                        // main: ARP_*
+int arp_mode;
+int arp_note, arp_octave = 0, arp_direction = 1;
+const int kArpOctaves = 1;
+const float kArpGate = 0.5f;
+int32_t arp_step_prev = -1;
+int arp_playing = -1;                        // the note the arpeggiator holds, or -1
+bool arp_running_prev;
+int32_t arp_beats;                           // whole beats since the clock started
+float arp_ramp_prev;
+float arp_free;                              // steps, while the clock is stopped
+uint32_t arp_rand = 0x2545F491u;
+// This Plaits block's clock (sp1_midi_audio_arp_clock).
+bool arp_clk_running;
+float arp_clk_ramp, arp_clk_beats_per_block, arp_clk_steps_per_beat;
+#endif
 volatile uint32_t q_head;                    // producer
 volatile uint32_t q_tail;                    // consumer
 volatile uint32_t st_received, st_dropped;
@@ -510,6 +538,133 @@ void AllNotesOff() {
   }
 }
 
+#if defined(CONFIG_SP1_ARP)
+void ArpRelease() {
+  if (arp_playing >= 0) {
+    NoteOff(static_cast<uint8_t>(arp_playing));
+    arp_playing = -1;
+  }
+}
+
+void ArpRestart() {
+  arp_note = 0;
+  arp_octave = 0;
+  arp_direction = 1;
+}
+
+// Yarns' Part::ClockArpeggiator, one step: the next note of the held keys.
+void ArpStep() {
+  const int n = arp_keys.size();
+  ArpRelease();
+  if (n == 0) {
+    return;
+  }
+  if (n == 1 && kArpOctaves == 1) {
+    arp_note = 0;
+    arp_octave = 0;
+  } else if (arp_mode == ARP_RANDOM) {
+    arp_rand = arp_rand * 1664525u + 1013904223u;
+    arp_octave = static_cast<int>((arp_rand >> 8) & 0xFFu) % kArpOctaves;
+    arp_note = static_cast<int>(arp_rand >> 16) % n;
+  } else {
+    bool wrapped = true;
+    while (wrapped) {
+      if (arp_note >= n || arp_note < 0) {
+        arp_octave += arp_direction;
+        arp_note = arp_direction > 0 ? 0 : n - 1;
+      }
+      wrapped = false;
+      if (arp_octave >= kArpOctaves || arp_octave < 0) {
+        arp_octave = arp_direction > 0 ? 0 : kArpOctaves - 1;
+        if (arp_mode == ARP_UP_DOWN) {
+          arp_direction = -arp_direction;
+          arp_note = arp_direction > 0 ? 1 : n - 2;
+          arp_octave = arp_direction > 0 ? 0 : kArpOctaves - 1;
+          wrapped = true;
+        }
+      }
+    }
+  }
+  const stmlib::NoteEntry& e = arp_mode == ARP_AS_PLAYED
+      ? arp_keys.played_note(static_cast<uint8_t>(arp_note))
+      : arp_keys.sorted_note(static_cast<uint8_t>(arp_note));
+  int note = e.note + 12 * arp_octave;
+  while (note > 127) {
+    note -= 12;
+  }
+  NoteOn(static_cast<uint8_t>(note), e.velocity & 0x7Fu);
+  arp_playing = note;
+  if (arp_mode != ARP_RANDOM) {
+    arp_note += arp_direction;
+  }
+}
+
+// Once per Plaits block, after the block's messages: the step clock and the gate.
+void ArpBlock() {
+  const int want = arp_req;
+  if (want != arp_mode) {
+    ArpRelease();
+    AllNotesOff();
+    arp_keys.Clear();
+    arp_mode = want;
+    ArpRestart();
+    arp_step_prev = -1;
+  }
+  if (arp_mode == ARP_OFF) {
+    return;
+  }
+  float pos;
+  if (arp_clk_running) {
+    if (!arp_running_prev) {
+      arp_beats = -1;                  // as the MIDI file: the first wrap is beat 1
+      arp_ramp_prev = arp_clk_ramp;
+      arp_step_prev = -1;
+    }
+    if (arp_clk_ramp < arp_ramp_prev) {
+      ++arp_beats;
+    }
+    arp_ramp_prev = arp_clk_ramp;
+    pos = (static_cast<float>(arp_beats) + arp_clk_ramp) * arp_clk_steps_per_beat;
+  } else {
+    arp_free += arp_clk_beats_per_block * arp_clk_steps_per_beat;
+    if (arp_free > 1.0e6f) {
+      arp_free -= 1.0e6f;
+    }
+    pos = arp_free;
+  }
+  arp_running_prev = arp_clk_running;
+  if (pos < 0.0f) {
+    return;                            // the clock started; beat 1 has not come yet
+  }
+  const int32_t step = static_cast<int32_t>(pos);
+  const float frac = pos - static_cast<float>(step);
+  if (step != arp_step_prev) {
+    arp_step_prev = step;
+    ArpStep();
+  } else if (arp_playing >= 0 && frac >= kArpGate) {
+    ArpRelease();
+  }
+}
+
+void ArpKey(uint8_t note, uint8_t vel, bool on) {
+  if (on) {
+    if (arp_keys.size() == 0) {
+      ArpRestart();
+      if (!arp_clk_running) {
+        arp_step_prev = -1;            // stopped: the first note at once, then the grid
+        arp_free = 0.0f;
+      }
+    }
+    arp_keys.NoteOn(note, vel);
+  } else {
+    arp_keys.NoteOff(note);
+    if (arp_keys.size() == 0) {
+      ArpRelease();
+    }
+  }
+}
+#endif
+
 // ---- CC offsets ---------------------------------------------------------------------------
 // A CC is a second hand on its fader, read the way Marbles' INTELLIGENT range reads its
 // destination (M4c; Adara's M5a test notes): a BIPOLAR parameter takes a CENTRED CC and a
@@ -771,6 +926,12 @@ __attribute__((noinline)) void Process(const Event& e) {
       if (d2 > 0) {
         session = true;
         st_notes = st_notes + 1u;
+#if defined(CONFIG_SP1_ARP)
+        if (arp_mode != ARP_OFF) {
+          ArpKey(d1, d2, true);
+          break;
+        }
+#endif
         NoteOn(d1, d2);
         if (g_cfg.vel_dest >= 0) {
           Publish(g_cfg.vel_dest);
@@ -780,6 +941,12 @@ __attribute__((noinline)) void Process(const Event& e) {
       // fall through: a note-on at velocity 0 is a note-off
     case 0x80:
       session = true;
+#if defined(CONFIG_SP1_ARP)
+      if (arp_mode != ARP_OFF) {
+        ArpKey(d1, 0u, false);
+        break;
+      }
+#endif
       NoteOff(d1);
       break;
     case 0xB0:
@@ -1490,8 +1657,27 @@ extern "C" bool sp1_midi_audio_begin(uint32_t cycles, uint32_t blocks, uint8_t e
     return true;
   }
 #endif
+#if defined(CONFIG_SP1_ARP)
+  if (arp_req != ARP_OFF || arp_mode != ARP_OFF) {
+    return true;                       // its clock and its gates run every Plaits block
+  }
+#endif
   return block_n > 0u || active || !settled;
 }
+
+#if defined(CONFIG_SP1_ARP)
+extern "C" void sp1_midi_set_arp(int mode) {
+  arp_req = (mode < 0 || mode >= ARP_MODES) ? ARP_OFF : mode;
+}
+
+extern "C" void sp1_midi_audio_arp_clock(bool running, float ramp, float beats_per_block,
+                                         float steps_per_beat) {
+  arp_clk_running = running;
+  arp_clk_ramp = ramp;
+  arp_clk_beats_per_block = beats_per_block;
+  arp_clk_steps_per_beat = steps_per_beat;
+}
+#endif
 
 #if defined(CONFIG_SP1_MIDIFILE)
 extern "C" void sp1_midi_audio_file_live(bool live) {
@@ -1531,6 +1717,9 @@ extern "C" void sp1_midi_audio_block(uint32_t j, sp1_midi_frame* f) {
   while (file_next < file_n && !trig_pending) {
     Process(file_q[file_next++]);
   }
+#endif
+#if defined(CONFIG_SP1_ARP)
+  ArpBlock();
 #endif
   // Every MIDI block costs the same from here on, whether anything moves or not.
   Refresh();

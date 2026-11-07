@@ -155,11 +155,15 @@ export class WakesDevice {
 		if (!this.autoReboot) {
 			return;
 		}
-		// What the nRF does next. SYSTEM_OFF waits for a wake edge; the rest restart now.
+		// What the nRF does next. SYSTEM_OFF waits for "••" (or VBUS); the rest restart now.
 		if (why === STOP.SOFT_RESET || why === STOP.FAULT || why === STOP.MAIN_RETURNED) {
 			this.pendingBoot = RESETREAS.SREQ;
 		} else if (why === STOP.WATCHDOG) {
 			this.pendingBoot = RESETREAS.DOG;
+		} else if (why === STOP.SYSTEM_OFF && this.inputs.fnc) {
+			// "••" is a LEVEL sense on P0.27 (sp1_ui_timing.h): held as the chip goes off, it
+			// wakes it at once -- which is why Wakes' own power-off waits for the release.
+			this.pendingBoot = RESETREAS.OFF;
 		}
 	}
 

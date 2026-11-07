@@ -47,6 +47,13 @@ lines Wakes needs (the 1M mono branch of `Part::InternalNoteOn/Off`, and `Voice:
 portamento and pitch bend) are PORTED into `firmware/src/sp1_midi.cc`, attributed there and
 in NOTICE, from `yarns/part.cc` and `yarns/voice.cc` at the eurorack commit above.
 
+**Reverb (experimental, `CONFIG_SP1_REVERB`):** `clouds/dsp/fx/fx_engine.h`,
+`clouds/dsp/fx/reverb.h` and `clouds/dsp/frame.h`, from the same eurorack commit — Clouds'
+Griesinger/Dattorro reverb on its 16 384-sample, 12-bit delay memory (32 KB). Clouds is an
+STM32F project, so MIT. Header-only; `reverb.h` expects `frame.h` to be included first, as
+Clouds' own `granular_processor.h` does. Compiled only into builds with the option
+(`docs/HEADROOM.md`).
+
 ⚠️ **`plaits/user_data.h` is deliberately absent.** Upstream's version includes STM32
 headers and reads a raw flash address (`0x08007000`) that does not exist on the nRF52840 —
 reading it would be a bus fault. `firmware/src/plaits_shim/plaits/user_data.h` replaces it

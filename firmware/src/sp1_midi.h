@@ -255,6 +255,16 @@ void sp1_midi_audio_block(uint32_t j, struct sp1_midi_frame *out);
  * gate has closed after the last key (or at once when the engine bypasses its LPG). */
 void sp1_midi_audio_lpg(float gain, bool bypassed);
 
+#if defined(CONFIG_SP1_ARP)
+/* The arpeggiator (experimental, docs/HEADROOM.md). Main: 0 off, 1 up, 2 up-down, 3 random,
+ * 4 as played. Audio thread, before sp1_midi_audio_block(j): this Plaits block's clock --
+ * Marbles running and its master ramp, or the tempo to free-run at -- and the steps per beat
+ * (the burst division / 4). */
+void sp1_midi_set_arp(int mode);
+void sp1_midi_audio_arp_clock(bool running, float ramp, float beats_per_block,
+			      float steps_per_beat);
+#endif
+
 #if defined(CONFIG_SP1_MIDIFILE)
 /* A second source of notes: the MIDI file player (sp1_midifile.h), audio thread.
  * sp1_midi_audio_file_live() before sp1_midi_audio_begin (true: run the Plaits blocks even

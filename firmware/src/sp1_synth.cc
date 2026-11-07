@@ -24,6 +24,10 @@
 #include "stmlib/dsp/dsp.h"
 #include "stmlib/utils/buffer_allocator.h"
 #include "plaits/dsp/voice.h"
+#if defined(CONFIG_SP1_REVERB)
+#include "clouds/dsp/frame.h"            // reverb.h expects FloatFrame first, as Clouds does
+#include "clouds/dsp/fx/reverb.h"
+#endif
 
 namespace {
 
@@ -37,6 +41,45 @@ char arena[16384];
 // pointer -> fatal -> reboot. Constructing explicitly removes that dependency.
 alignas(plaits::Voice) unsigned char voice_mem[sizeof(plaits::Voice)];
 plaits::Voice* voice = nullptr;
+
+#if defined(CONFIG_SP1_REVERB)
+// ---- reverb (experimental, docs/HEADROOM.md): Clouds' Griesinger reverb, audio thread ----
+// Mono in (the voice after the output mode's mix), after the voice and BEFORE the drive and
+// the limiter, so the tail is limited with the rest.
+//
+// HALF RATE: the reverb runs at 24 kHz (pairs averaged in, linear interpolation out) and the
+// dry / wet mix at 48 kHz. Clouds' loop costs ~290-390 Cortex-M4 cycles a sample (clang's
+// ARM code, counted), 22-29 % of the CPU at 48 kHz; at 24 kHz half that. Clouds tuned its
+// delay lengths for 32 kHz, so the room is a third larger and darker -- a reverb tail has
+// little above 12 kHz anyway, and the loop's own low-pass takes most of it.
+//
+// THE GUARD: no engine-independent budget is left for a fixed cost (2-op FM alone is ~90 %),
+// and an audio thread over budget starves main until the watchdog resets the device. So the
+// reverb only runs while the engine's own load plus the reverb's MEASURED cost stays under
+// kReverbLimit. Over it, the reverb pauses (main logs it) and STAYS paused until the engine
+// or the reverb step changes: an engine's load swings with what it plays, and a guard that
+// let it back in on a quiet moment flapped (tail cut, memory cleared, again). After a
+// change it measures for kReverbSettle blocks before it judges. Off costs nothing at all.
+const size_t kReverbDecim = 2;
+static_assert(plaits::kBlockSize % kReverbDecim == 0, "the reverb's half rate needs an even block");
+const float kReverbLimit = 0.90f;            // of the audio block, synth only (AUD reads ~1.5 more)
+const int kReverbSettle = 64;                // blocks (~130 ms at 2 ms blocks)
+const uint32_t kReverbWords = 16384u;
+const uint32_t kReverbClearStep = 2048u;     // cleared over 8 blocks, never 32 KB at once
+uint16_t reverb_memory[kReverbWords];        // 32 KB, Clouds' FxEngine<16384, 12-bit>
+clouds::Reverb reverb;
+volatile int reverb_req;                     // main: 0 off, 1..4
+int reverb_step;                             // audio thread: what was applied
+float reverb_amount;                         // our dry/wet, at 48 kHz
+float reverb_prev;                           // the last 24 kHz wet sample (upsampling)
+uint32_t reverb_clear = kReverbWords;        // < kReverbWords: still clearing
+bool reverb_allowed = true;                  // the guard
+float reverb_dry_load = -1.0f;               // smoothed, fractions of the block; < 0: unset
+float reverb_cost = 0.15f;                   // until measured: ~ the ARM count's 12-16 %
+int reverb_settle = kReverbSettle;
+volatile int reverb_paused;                  // published for main's log
+volatile int reverb_dry_pct, reverb_cost_pct;
+#endif
 
 plaits::Patch patch;
 plaits::Modulations mods;
@@ -380,6 +423,30 @@ __attribute__((noinline)) void AddRoute(Routing* r, int source, int dest, float 
   ++r->count;
 }
 
+#if defined(CONFIG_SP1_REVERB)
+// One Plaits block through the reverb, in place. Out of line on purpose: the emulator's CPU
+// meter charges this function by an ARM instruction count (emulator/tools/wasm_cycles.py,
+// FUNC_SCALE), because its wasm translation is about twice as long as the Cortex-M4 code.
+__attribute__((noinline)) void ReverbBlock(float* v) {
+  // `v` is in 16-bit scale (the stage below); Clouds' reverb works at +-1, where its 12-bit
+  // memory has its range (+-8) and its resolution (1/4096).
+  const size_t n = plaits::kBlockSize / kReverbDecim;
+  clouds::FloatFrame fr[plaits::kBlockSize / kReverbDecim];
+  for (size_t i = 0; i < n; ++i) {
+    fr[i].l = fr[i].r = 0.5f * kQ15 * (v[2 * i] + v[2 * i + 1]);
+  }
+  reverb.Process(fr, n);
+  const float amount = reverb_amount;
+  for (size_t i = 0; i < n; ++i) {
+    const float w1 = 16384.0f * (fr[i].l + fr[i].r);
+    const float w0 = reverb_prev;
+    reverb_prev = w1;
+    v[2 * i] += amount * (0.5f * (w0 + w1) - v[2 * i]);
+    v[2 * i + 1] += amount * (w1 - v[2 * i + 1]);
+  }
+}
+#endif
+
 #if defined(CONFIG_SP1_MIDIFILE)
 void MidiFileEmit(void*, const uint8_t msg[3], uint8_t len) {
   sp1_midi_audio_file(msg, len);
@@ -408,6 +475,9 @@ extern "C" void sp1_synth_init(void) {
   }
   sp1_marbles_init();                  // M4: Marbles' generators, stopped
   voice = new (voice_mem) plaits::Voice();
+#if defined(CONFIG_SP1_REVERB)
+  reverb.Init(reverb_memory);
+#endif
   stmlib::BufferAllocator allocator(arena, sizeof(arena));
   voice->Init(&allocator);
 
@@ -486,6 +556,9 @@ uint32_t (*midi_clock)(void);                // NULL = untimed (sp1_synth_set_mi
 
 extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
   const uint32_t prof_t0 = Now();
+#if defined(CONFIG_SP1_REVERB)
+  const uint32_t frames_in = frames;
+#endif
   const uint32_t miss_t0 = Miss();
   uint32_t prof_eng = 0u;
   uint32_t prof_post = 0u;
@@ -545,6 +618,52 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
   if (engine_changed) {
     drum_active = -1;                  // a new engine choice is heard at once
   }
+#endif
+
+#if defined(CONFIG_SP1_REVERB)
+  {
+    const int rq = reverb_req;
+    if (rq != reverb_step) {
+      if (reverb_step == 0) {
+        reverb_clear = 0u;             // from off: no stale tail (cleared over 8 blocks)
+        reverb_prev = 0.0f;
+      }
+      reverb_step = rq;
+      reverb_allowed = true;           // a new step: judge again
+      reverb_settle = kReverbSettle;
+      reverb_paused = 0;
+      // Four steps from the decay measured at 24 kHz (tone bursts, docs/HEADROOM.md):
+      // RT60 at 1 kHz about 1.8 / 2.3 / 3.8 / 6.3 s -- at half rate Clouds' network does not
+      // go much shorter than 1.6 s. Low notes ring a little longer, highs shorter (the loop's
+      // low-pass). The reverb is fully wet; the dry / wet mix is ours, at 48 kHz.
+      static const float kAmount[5] = { 0.0f, 0.26f, 0.30f, 0.38f, 0.45f };
+      static const float kTime[5] = { 0.0f, 0.30f, 0.45f, 0.65f, 0.80f };
+      reverb_amount = kAmount[rq];
+      reverb.set_amount(1.0f);
+      reverb.set_diffusion(0.7f);
+      reverb.set_time(kTime[rq]);
+      reverb.set_input_gain(0.3f);
+      reverb.set_lp(0.7f);
+    }
+    if (reverb_clear < kReverbWords) {
+      for (uint32_t i = 0; i < kReverbClearStep; ++i) {
+        reverb_memory[reverb_clear + i] = 0u;
+      }
+      reverb_clear += kReverbClearStep;
+    }
+  }
+  if (engine_changed && reverb_step > 0) {
+    if (!reverb_allowed) {
+      reverb_clear = 0u;               // a new engine: judge again, from a clean memory
+      reverb_prev = 0.0f;
+    }
+    reverb_allowed = true;
+    reverb_settle = kReverbSettle;
+    reverb_dry_load = -1.0f;
+    reverb_paused = 0;
+  }
+  const bool reverb_on = reverb_step > 0 && reverb_allowed && reverb_clear >= kReverbWords;
+  uint32_t reverb_cycles = 0u;
 #endif
 
   bool pulse_started = false;          // a new RWD / burst TRIG this audio block
@@ -677,6 +796,16 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     // PLAY, RATE and the t range. Its notes join USB's for this Plaits block.
     if (midi) {
       sp1_mf_audio_block(mrb, mrb ? mrb_ramp[j] : 0.0f, MidiFileEmit, nullptr);
+    }
+#endif
+#if defined(CONFIG_SP1_ARP)
+    // The arpeggiator's clock (sp1_midi.h): Marbles' master ramp while it runs, else the
+    // tempo it would run at; its step is the burst division.
+    if (midi) {
+      sp1_midi_audio_arp_clock(mrb, mrb ? mrb_ramp[j] : 0.0f,
+                               clock_bpm * (1.0f / 60.0f) *
+                                   (static_cast<float>(plaits::kBlockSize) / 48000.0f),
+                               static_cast<float>(burst_div) * 0.25f);
     }
 #endif
     if (midi) {
@@ -939,6 +1068,13 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
       sp1_midi_audio_lpg(voice->sp1_lpg_gain(), voice->sp1_lpg_bypassed());
     }
 #endif
+#if defined(CONFIG_SP1_REVERB)
+    if (reverb_on) {
+      const uint32_t rv0 = Now();
+      ReverbBlock(v);
+      reverb_cycles += Now() - rv0;
+    }
+#endif
     if (drive_inc == 0.0f) {
       StageBlockAny(limiting, driving, v, out, drive_g);
     } else {
@@ -953,6 +1089,26 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     frames -= plaits::kBlockSize;
   }
   output_prev = omode;
+#if defined(CONFIG_SP1_REVERB)
+  // ---- the guard (above): the engine's load without the reverb, and the reverb's own ----
+  if (cyc_counter && reverb_step > 0) {
+    const float budget = static_cast<float>(frames_in) * (64.0e6f / 48000.0f);
+    const float total = static_cast<float>(Now() - prof_t0);
+    const float dry = (total - static_cast<float>(reverb_cycles)) / budget;
+    reverb_dry_load = reverb_dry_load < 0.0f ? dry : reverb_dry_load + 0.05f * (dry - reverb_dry_load);
+    if (reverb_on) {
+      reverb_cost += 0.05f * (static_cast<float>(reverb_cycles) / budget - reverb_cost);
+    }
+    if (reverb_settle > 0) {
+      --reverb_settle;
+    } else if (reverb_allowed && reverb_dry_load + reverb_cost > kReverbLimit) {
+      reverb_allowed = false;            // until the engine or the step changes
+      reverb_paused = 1;
+    }
+    reverb_dry_pct = static_cast<int>(100.0f * reverb_dry_load + 0.5f);
+    reverb_cost_pct = static_cast<int>(100.0f * reverb_cost + 0.5f);
+  }
+#endif
   prof.eng = prof_eng;
   prof.post = prof_post;
   prof.total = Now() - prof_t0;
@@ -1031,6 +1187,18 @@ extern "C" int sp1_synth_drive_db(int step) {
 extern "C" int sp1_synth_drive(void) {
   return drive_step;
 }
+
+#if defined(CONFIG_SP1_REVERB)
+extern "C" void sp1_synth_set_reverb(int step) {
+  reverb_req = step < 0 ? 0 : (step > 4 ? 4 : step);
+}
+
+extern "C" bool sp1_synth_reverb_paused(int* dry_pct, int* cost_pct) {
+  *dry_pct = reverb_dry_pct;
+  *cost_pct = reverb_cost_pct;
+  return reverb_paused != 0 && reverb_req > 0;
+}
+#endif
 
 extern "C" uint32_t sp1_synth_trig_edges(void) {
   return trig_edges;

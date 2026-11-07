@@ -108,6 +108,13 @@ third_party/eurorack/
   vendored. It uses stmlib/algorithms/note_stack.h, vendored unmodified from
   the stmlib commit above. firmware/src/plaits_ovr/plaits/dsp/voice.{h,cc}
   also expose the low-pass gate's state for MIDI (M5a).
+  Experimental, off in device builds (docs/HEADROOM.md): with CONFIG_SP1_REVERB,
+  Mutable Instruments Clouds' reverb -- clouds/dsp/fx/fx_engine.h,
+  clouds/dsp/fx/reverb.h and clouds/dsp/frame.h, vendored unmodified from the
+  same eurorack commit into third_party/eurorack/clouds (MIT) -- runs after the
+  voice. With CONFIG_SP1_ARP, firmware/src/sp1_midi.cc ports the arpeggiator
+  stepping of yarns/part.cc (Part::ClockArpeggiator: directions, octave walk,
+  up-down turnaround), same commit, MIT.
   Per upstream's guidelines the name "Mutable Instruments" is not used for
   this derivative work other than as attribution.
 

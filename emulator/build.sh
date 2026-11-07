@@ -22,9 +22,11 @@ WHAT=${1:-all}
 WASM_OUT=${EMU_WASM_OUT:-$HERE/web/wakes.wasm}     # tools/calibrate.sh builds a second one
 JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}
 # Kconfig overrides on top of prj.conf. Unset: the emulator's own, the experiments on --
-# drum hits (docs/DRUMS.md) and MIDI files (docs/MIDIFILE.md). EMU_KCONFIG= (empty) builds
+# drum hits (docs/DRUMS.md), MIDI files (docs/MIDIFILE.md), the reverb and the arpeggiator
+# (docs/HEADROOM.md).
+# EMU_KCONFIG= (empty) builds
 # exactly what prj.conf builds.
-EMU_KCONFIG=${EMU_KCONFIG-SP1_DRUM=y SP1_MIDIFILE=y}
+EMU_KCONFIG=${EMU_KCONFIG-SP1_DRUM=y SP1_MIDIFILE=y SP1_REVERB=y SP1_ARP=y}
 
 mkdir -p "$GEN" "$OVR"
 

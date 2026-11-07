@@ -163,10 +163,25 @@ panel, **Add files to WAKES/MIDI/1/…**, then hold the rocker down and press **
 for the melody, `low` for the bass. `docs/MIDIFILE.md` (the **MIDI files** tab) has the
 rules, the polyphony measurements and the limits.
 
-`EMU_KCONFIG` sets the Kconfig overrides. Unset, it is `SP1_DRUM=y SP1_MIDIFILE=y`. Set it empty
+## Experimental: reverb and arpeggiator
+
+Two more from the Mutable Instruments line, built on here and off on the device. They come with a
+survey of what else would fit in the SP-1's CPU and RAM: `docs/HEADROOM.md` (the **Headroom** tab).
+- **Clouds' reverb** (`CONFIG_SP1_REVERB`): PLAITS, double-tap `••` for SETTINGS, **T1** cycles
+  off / 1–4. It runs at half rate (~14.6 % of the CPU). A guard pauses it on engines that leave
+  too little room (2-op FM, grain-formant, additive) and logs `REVERB paused`.
+- **Yarns' arpeggiator** (`CONFIG_SP1_ARP`): MARBLES, double-tap `••` for SETTINGS, **T1**
+  cycles off / up / up-down / random / as played. Hold a chord on a MIDI keyboard, or play a MIDI
+  file. The step is the burst division (`••` + rocker on PLAITS) on Marbles' clock.
+
+The meter charges Clouds' reverb by an ARM instruction count rather than its wasm translation
+(`FUNC_SCALE` in `tools/wasm_cycles.py`). The wasm version is about twice as long as the
+Cortex-M4 code, and no hardware measurement exists for it to be calibrated against.
+
+`EMU_KCONFIG` sets the Kconfig overrides. Unset, it is `SP1_DRUM=y SP1_MIDIFILE=y SP1_REVERB=y SP1_ARP=y`. Set it empty
 (`EMU_KCONFIG= sh emulator/build.sh`) to build exactly what `prj.conf` builds, or to
 another list (`EMU_KCONFIG="SP1_DRUM=y SP1_PLAITS_BLOCK=12"`) to combine options.
-`test-node.mjs` runs its drum and MIDI file checks only when the build has them.
+`test-node.mjs` runs each experiment's checks only when the build has it.
 
 ## Test your own change
 
@@ -183,10 +198,10 @@ and publishes the page to GitHub Pages (Settings → Pages → Source: GitHub Ac
 
 | | In the emulator |
 |---|---|
-| Wakes' code | **Real**: every file in `firmware/src` but two, compiled unchanged; the generated headers come from the same `tools/gen_*.py`, the Plaits overrides from `tools/host-tests/mkovr.py`, the `CONFIG_` values from `firmware/Kconfig` + `prj.conf`, plus `EMU_KCONFIG` (default `SP1_DRUM=y SP1_MIDIFILE=y`) |
+| Wakes' code | **Real**: every file in `firmware/src` but two, compiled unchanged; the generated headers come from the same `tools/gen_*.py`, the Plaits overrides from `tools/host-tests/mkovr.py`, the `CONFIG_` values from `firmware/Kconfig` + `prj.conf`, plus `EMU_KCONFIG` (default: the four experiments on) |
 | Threads | Zephyr's rule (highest priority ready runs; a wake that outranks preempts), as coroutines on **virtual time**: audio, main and the storage thread interleave as on the device |
 | Faders, buttons | The ladder voltages Wakes' tables were measured from, including the rail sag a pressed ladder puts on the faders; Wakes' own decode, debounce and sag rejection run on them |
-| `••`, charger, USB VBUS | GPIO and POWER registers; `••` and VBUS wake the device from SYSTEM_OFF |
+| `••`, charger, USB VBUS | GPIO and POWER registers; `••` and VBUS wake the device from SYSTEM_OFF. `••` is a level, as P0.27's sense is: held as the chip goes off, it wakes it at once |
 | LEDs | The PWM duty Wakes sets on each channel |
 | Audio | The I2S stream, clocked at exactly 48 kHz while the audio oscillator pin is high; what the speaker and headphones get |
 | Codecs | CS42L42 and TAS2505 as I2C register files that answer Wakes' ID and clock checks; no analog model |
