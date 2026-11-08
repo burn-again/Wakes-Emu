@@ -15,6 +15,8 @@ compatible with that. Builds without the flag contain none of this code and stay
 - `REAL_FS` set to 48000 (upstream 44140);
 - the STM32 TCM placement macros (`INDTCM`, `INDTCMZ`, `IN_ITCM_RAM`) are empty, so that code and data
   go in the normal sections (the nRF52840 has no TCM);
+- the interpolating wavetable reads (`Oscillator.c`) wrap within their 1024-entry row; upstream
+  read one entry past it, into the next table row (found by AddressSanitizer);
 - `calcNoise()` tests the phase wrap explicitly instead of reading the APSR flags;
 - STM32 HAL, RNG, ADC and parameter-array dependencies replaced by stubs (`stub/`, `lxr_stubs.c`);
 - `lxr_kit.c` (new): the five-control wrapper, rendering in LXR's 64-sample blocks.
