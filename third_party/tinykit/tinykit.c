@@ -77,6 +77,7 @@ static inline float sin_p(uint32_t p) {        /* linear-interp table sine */
 }
 
 /* time in seconds -> per-sample multiplier reaching -60 dB */
+#define TK_MODAL_DEAD 1e-5f        /* a modal partial below this (-100 dB) stops */
 static float k_of(float seconds) { return expf(-6.9078f / (seconds * SR)); }
 static float note_hz(float pitch01) { return 440.0f * exp2f((pitch01 * 120.0f - 69.0f) / 12.0f); }
 
@@ -205,6 +206,7 @@ void tk_trigger(tk_voice *v, float vel) {
   }
   case TK_ENG_MODAL: {
     const tk_modal_model *mm = &kModal[v->model];
+    v->u.modal.live = 0u;
     float wsum = 0.0f;
     for (unsigned i = 0; i < TK_MODES; ++i) wsum += mm->w[i];
     for (unsigned i = 0; i < TK_MODES; ++i) {
@@ -212,17 +214,20 @@ void tk_trigger(tk_voice *v, float vel) {
       float audible = f < 0.45f ? 1.0f : 0.0f;          /* drop partials above ~21 kHz */
       f = clampf(f, 0.0f, 0.45f);
       float w = 6.2831853f * f;
-      v->u.modal.cs[i] = cosf(w); v->u.modal.sn[i] = sinf(w);
-      v->u.modal.c[i] = 0.0f; v->u.modal.s[i] = 1.0f;
       /* TONE = brightness: tilt of initial partial levels */
       float tilt = exp2f(-(float)i * (1.0f - T) * 1.6f);
       /* EXCITE = strike position: 0 = centre (all modes), 1 = near the edge (comb) */
       float pos = 0.5f - 0.45f * X;
       float strike = fabsf(sinf(3.14159265f * (float)(i + 1) * pos));
-      v->u.modal.e[i] = audible * mm->w[i] * tilt * (0.2f + 0.8f * strike) / wsum * 1.4f * v->env;
+      const float amp = audible * mm->w[i] * tilt * (0.2f + 0.8f * strike) / wsum * 1.4f * v->env;
       /* MOD = upper partials die faster */
       float tsec = 0.02f * exp2f(D * 7.0f) * mm->d[i] / (1.0f + (float)i * M * 3.0f);
-      v->u.modal.k[i] = k_of(tsec);
+      const float k = k_of(tsec);
+      /* The decay rides on the rotation: (a, b) = k (cos w, sin w). Starting at s = amp / k
+         makes the first output amp cos(w), as the separate-envelope form gave. */
+      v->u.modal.a[i] = k * cosf(w); v->u.modal.b[i] = k * sinf(w);
+      v->u.modal.c[i] = 0.0f; v->u.modal.s[i] = amp / k;
+      if (amp > 0.0f) v->u.modal.live |= 1u << i;
     }
     v->env_k = 1.0f;                           /* the partials carry their own decay */
     v->lp = (0.15f + 0.6f * T) * v->env;       /* mallet click level: brighter = harder beater */
@@ -529,28 +534,56 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
   }
   /* ------------------------------------------------------------- modal */
   case TK_ENG_MODAL: {
-    /* coupled-form oscillators, one per partial; EXCITE = pitch drop applied as a
-       per-block rotation tweak; renormalise once per block. */
-    float *c = v->u.modal.c, *s = v->u.modal.s, *e = v->u.modal.e, *k = v->u.modal.k;
-    const float *cs = v->u.modal.cs, *sn = v->u.modal.sn;
-    float sum_e = 0.0f, click = v->lp;
-    for (unsigned i = 0; i < n; ++i) {
-      float y = rndf(&rng) * click;              /* ~1 ms beater click */
-      click *= 0.93f;
-      for (unsigned j = 0; j < TK_MODES; ++j) {
-        const float cj = c[j] * cs[j] - s[j] * sn[j];
-        const float sj = s[j] * cs[j] + c[j] * sn[j];
-        c[j] = cj; s[j] = sj;
-        y += sj * e[j];
-        e[j] *= k[j];
+    /* One damped rotation per partial per sample: (c, s) <- (a c - b s, b c + a s), where
+       (a, b) = decay x (cos, sin) of the partial's step, so the amplitude falls with no
+       separate envelope multiply. Two partials at a time, their state in registers. Partials
+       below -100 dB (TK_MODAL_DEAD) are dropped: high ones die long before the fundamental.
+       No renormalising: the step's radius is k < 1 to within a float rounding (~1e-7), far
+       below the slowest decay's 1 - k (~3e-5), so it can only decay. */
+    float *C = v->u.modal.c, *S = v->u.modal.s;
+    const float *A = v->u.modal.a, *B = v->u.modal.b;
+    uint32_t live = v->u.modal.live;
+    float click = v->lp;
+    if (click != 0.0f) {                         /* ~1 ms beater click */
+      for (unsigned i = 0; i < n; ++i) { out[i] += rndf(&rng) * click; click *= 0.93f; }
+      v->lp = click < 1e-5f ? 0.0f : click;
+    }
+    /* the live partials, then two at a time: one load and store of out[] serves both */
+    unsigned idx[TK_MODES], nl = 0;
+    for (unsigned j = 0; j < TK_MODES; ++j) if (live & (1u << j)) idx[nl++] = j;
+    unsigned q = 0;
+    for (; q + 1u < nl; q += 2u) {
+      const unsigned j0 = idx[q], j1 = idx[q + 1u];
+      float c0 = C[j0], s0 = S[j0], c1 = C[j1], s1 = S[j1];
+      const float a0 = A[j0], b0 = B[j0], a1 = A[j1], b1 = B[j1];
+      for (unsigned i = 0; i < n; ++i) {
+        const float n0 = a0 * c0 - b0 * s0, n1 = a1 * c1 - b1 * s1;
+        s0 = b0 * c0 + a0 * s0; s1 = b1 * c1 + a1 * s1;
+        c0 = n0; c1 = n1;
+        out[i] += s0 + s1;
       }
-      out[i] += y;
+      C[j0] = c0; S[j0] = s0; C[j1] = c1; S[j1] = s1;
     }
-    for (unsigned j = 0; j < TK_MODES; ++j) {
-      const float g = 1.5f - 0.5f * (c[j] * c[j] + s[j] * s[j]);
-      c[j] *= g; s[j] *= g; sum_e += e[j];
+    if (q < nl) {
+      const unsigned j = idx[q];
+      float c = C[j], s = S[j];
+      const float a = A[j], b = B[j];
+      for (unsigned i = 0; i < n; ++i) {
+        const float cn = a * c - b * s;
+        s = b * c + a * s;
+        c = cn;
+        out[i] += s;
+      }
+      C[j] = c; S[j] = s;
     }
-    v->lp = click < 1e-5f ? 0.0f : click;
+    float sum_e = 0.0f;                          /* once per block: amplitudes, and the dead */
+    for (q = 0; q < nl; ++q) {
+      const unsigned j = idx[q];
+      const float e2 = C[j] * C[j] + S[j] * S[j];
+      if (e2 < TK_MODAL_DEAD * TK_MODAL_DEAD) { live &= ~(1u << j); C[j] = S[j] = 0.0f; }
+      else sum_e += sqrtf(e2);
+    }
+    v->u.modal.live = live;
     (void)pe;
     env = sum_e;                       /* active while any partial rings */
     break;
@@ -569,6 +602,6 @@ void tk_choke(tk_voice *v) {
 #endif
   v->env = 0.0f;
   v->lp = 0.0f;
-  if (v->engine == TK_ENG_MODAL) for (unsigned j = 0; j < TK_MODES; ++j) v->u.modal.e[j] = 0.0f;
+  if (v->engine == TK_ENG_MODAL) { for (unsigned j = 0; j < TK_MODES; ++j) v->u.modal.c[j] = v->u.modal.s[j] = 0.0f; v->u.modal.live = 0u; }
   if (v->engine == TK_ENG_SHAKER) v->u.shk.energy = 0.0f;
 }

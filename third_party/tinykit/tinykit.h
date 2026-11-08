@@ -51,7 +51,9 @@ typedef struct tk_voice {
   union {
     struct { float amp[TK_GENDY_BP]; uint32_t dur[TK_GENDY_BP]; uint32_t idx, pos; float a0, a1; } gendy;
     struct { int16_t line[TK_KS_MAX]; uint32_t len, w; uint32_t burst; } ks;
-    struct { float c[TK_MODES], s[TK_MODES], e[TK_MODES], k[TK_MODES], cs[TK_MODES], sn[TK_MODES]; } modal;
+    /* per partial: (c, s) carries phase AND amplitude; (a, b) = decay x (cos, sin) of the step,
+       so every sample is one damped rotation. `live`: bit j set while partial j is audible. */
+    struct { float c[TK_MODES], s[TK_MODES], a[TK_MODES], b[TK_MODES]; uint32_t live; } modal;
     struct { tk_reso f[3]; float energy, gain[3]; } shk;
     struct { float fb1, fb2; } fm;
   } u;
