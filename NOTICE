@@ -170,6 +170,18 @@ Data inherited from upstream Plaits, redistributed as upstream publishes it
   even though the 6-op engines are disabled. Upstream publishes both under the
   MIT licence and states no further provenance.
 
+Classic drum voices (drum firmware, ONLY in images built with CONFIG_SP1_CLASSIC)
+  erica-synths/lxr-desktop-app — the LXR firmware's drum, snare, hi-hat and
+  cymbal DSP — Copyright (C) 2012-2026 Erica Synths — GPL-3.0-only with the
+  additional terms in third_party/tinykit/lxr/NOTICE-upstream.md
+  https://github.com/erica-synths/lxr-desktop-app
+  Licence text: third_party/tinykit/lxr/LICENSE
+  Modified (listed in third_party/tinykit/lxr/README.md). An image built with
+  CONFIG_SP1_CLASSIC is GPL-3.0 as a whole and must be distributed with its
+  source; images without it contain none of this code. "Erica Synths" and
+  "LXR" are their trademarks, used only as attribution; on the device the
+  voices are called "classic".
+
 "Teenage Engineering", "SP-1" and "Stem Player" are used only to identify the
 hardware this firmware runs on. "Mutable Instruments", "Plaits" and "Marbles"
 are used only as attribution.

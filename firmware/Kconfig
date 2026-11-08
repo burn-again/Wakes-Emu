@@ -239,6 +239,30 @@ config SP1_PLAITS
 	  set CONFIG_SP1_PLAITS=n in prj.conf and rebuild: everything else in the
 	  build (headphone mute, LEDs, power) stays exactly as it was.
 
+config SP1_DRUMS
+	bool "Drum firmware: a four-slot drum kit replaces the Plaits voice"
+	default n
+	depends on SP1_PLAITS
+	help
+	  Stage 1 of the drum firmware (docs: the SP-1 Drum Firmware Spec). The Plaits voice is
+	  still built but no longer rendered: a four-slot kit of tinykit voices plays instead,
+	  with the bus FX (DJ filter, fold, Chebyshev, FM) after it and Wakes' drive, limiter
+	  and VOL unchanged. Marbles' t1 / t3 / t2 and a Y clock trigger the slots while it
+	  runs; RWD auditions slot 1. Engine select picks one of eight built-in kits, and the
+	  PLAITS page's faders become kit pitch / tone / decay / mod, SHIFT the four FX amounts.
+	  See firmware/src/sp1_drums.h. The page layout (KIT, DRUM 1-4) is stage 2.
+
+config SP1_CLASSIC
+	bool "Drum firmware: classic voices (LXR-derived, GPL-3.0)"
+	default n
+	depends on SP1_DRUMS
+	help
+	  Adds the classic kick, tom, perc, snare, hi-hat and cymbal, ported from the Erica
+	  Synths LXR firmware (third_party/tinykit/lxr). That code is GPL-3.0-only: a firmware
+	  built with this option must be distributed under GPL-3.0 with its source. Without
+	  it, none of that code is compiled and the firmware stays MIT. Kit 8 is the classic
+	  kit with it, "gong garden" without.
+
 config SP1_STRING_VOICES
 	int "String engine: number of strings (Plaits kNumStrings)"
 	range 1 3

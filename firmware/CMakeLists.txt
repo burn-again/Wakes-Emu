@@ -432,6 +432,27 @@ if(CONFIG_SP1_PLAITS)
 		endif()
 	endforeach()
 	zephyr_library_sources(src/sp1_synth.cc src/sp1_marbles.cc src/sp1_zero.cc ${PLAITS_SOURCES})
+	# ---- drum firmware, stage 1 (CONFIG_SP1_DRUMS): the kit, its FX and bass (MIT) ----
+	if(CONFIG_SP1_DRUMS)
+		set(TINYKIT ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/tinykit)
+		zephyr_library_sources(src/sp1_drums.cc ${TINYKIT}/tinykit.c ${TINYKIT}/tinyfx.c
+			${TINYKIT}/tinybass.c)
+		zephyr_library_include_directories(${TINYKIT})
+		# The "classic" voices (CONFIG_SP1_CLASSIC): GPL-3.0, all in third_party/tinykit/lxr.
+		# A bin built with them is GPL-3.0; without the option none of this code is linked.
+		# Upstream DSP code: its own include paths and no warnings (it is not ours to fix).
+		if(CONFIG_SP1_CLASSIC)
+			set(LXR ${TINYKIT}/lxr)
+			file(GLOB LXR_SRC ${LXR}/src/*.c)
+			list(APPEND LXR_SRC ${LXR}/lxr_kit.c ${LXR}/lxr_stubs.c)
+			zephyr_library_sources(${LXR_SRC})
+			set_source_files_properties(${LXR_SRC} PROPERTIES
+				INCLUDE_DIRECTORIES "${LXR}/stub;${LXR}/inc"
+				COMPILE_OPTIONS "-w;-mfp16-format=ieee")
+			set_source_files_properties(${TINYKIT}/tinykit.c PROPERTIES
+				COMPILE_DEFINITIONS TK_WITH_LXR)
+		endif()
+	endif()
 	# #36: or GCC recognises sp1_zero's loops as a fill and calls memset -- the byte loop
 	# it exists to avoid (tools/ci/check_image.py checks). No unrolling: the body is
 	# unrolled by hand, and GCC's copy of the 0-3 byte head loop came to 600 bytes.

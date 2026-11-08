@@ -7,6 +7,9 @@
 // Deliberately includes NO Zephyr headers: the DSP layer stays framework-agnostic.
 
 #include "sp1_synth.h"
+#if defined(CONFIG_SP1_DRUMS)
+#include "sp1_drums.h"             // drum firmware stage 1: the kit replaces the voice's render
+#endif
 #include "sp1_marbles.h"
 #include "sp1_marbles_ui.h"
 #include "sp1_gtlt.h"
@@ -250,6 +253,7 @@ plaits::Voice::OutputMix MixFor(int mode) {
   }
 }
 
+__attribute__((unused))   // the drum firmware (CONFIG_SP1_DRUMS) never cross-fades the voice
 plaits::Voice::OutputMix MixLerp(const plaits::Voice::OutputMix& a,
                                  const plaits::Voice::OutputMix& b, float t) {
   return { a.out + (b.out - a.out) * t, a.aux + (b.aux - a.aux) * t,
@@ -374,6 +378,9 @@ extern "C" void sp1_synth_init(void) {
     return;
   }
   sp1_marbles_init();                  // M4: Marbles' generators, stopped
+#if defined(CONFIG_SP1_DRUMS)
+  sp1_drums_init();
+#endif
   voice = new (voice_mem) plaits::Voice();
   stmlib::BufferAllocator allocator(arena, sizeof(arena));
   voice->Init(&allocator);
@@ -608,6 +615,9 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
 #endif
 
   // Everything above runs once per audio block (#32: `pre`, Marbles excluded).
+#if defined(CONFIG_SP1_DRUMS)
+  sp1_drums_begin(&c);                 // kit, offsets and FX amounts for this DMA block
+#endif
   prof.pre = Now() - prof_t0 - prof.mrb;
   prof.miss_pre = Miss() - miss_t0 - prof.miss_mrb;
 
@@ -671,6 +681,10 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
       }
       burst_countdown -= static_cast<int32_t>(plaits::kBlockSize);
     }
+    // RWD, the burst and MIDI, before any Marbles gate joins TRIG: in the drum firmware
+    // they audition slot 1, while Marbles' gates play the slots directly.
+    const bool user_edge = new_edge;
+    uint8_t drum_rise = 0u;
     bool level = trig_blocks_left > 0;
     if (trig_blocks_left > 0) {
       --trig_blocks_left;
@@ -698,6 +712,7 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
       if (raw & static_cast<uint8_t>(~mrb_gates_prev) & trig_mask) {
         new_edge = true;
       }
+      drum_rise = static_cast<uint8_t>(raw & static_cast<uint8_t>(~mrb_gates_prev));
       mrb_gates_prev = raw;
       level = level || (raw & trig_mask) != 0u;
 
@@ -785,6 +800,12 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     ++j;
     const uint32_t prof_e0 = Now();
     const uint32_t miss_e0 = Miss();
+#if defined(CONFIG_SP1_DRUMS)
+    (void)user_edge;
+    sp1_drums_render(mrb ? drum_rise : 0u, mrb ? &mrb_volts[4u * (j - 1u)] : nullptr,
+                     user_edge, v, plaits::kBlockSize);
+#else
+    (void)user_edge; (void)drum_rise;
     if (fading) {
       const float t0 = static_cast<float>(j - 1u) * fade_step;
       voice->Render(patch, mods, MixLerp(mix_was, mix_now, t0),
@@ -792,6 +813,7 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     } else {
       voice->Render(patch, mods, mix_now, mix_now, v, plaits::kBlockSize);
     }
+#endif
     const uint32_t prof_e1 = Now();
     const uint32_t miss_e1 = Miss();
     prof_eng += prof_e1 - prof_e0;
