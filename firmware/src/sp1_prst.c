@@ -94,6 +94,9 @@ void sp1_prst_rip(struct sp1_prst *p, int slot)
 	p->out_mode = SP1_PRST_DEF_OUT;
 	p->burst_div = (int)SP1_PRST_DEF_BURST;
 	p->drive = SP1_PRST_DEF_DRIVE;
+#if defined(CONFIG_SP1_DRUMS)
+	sp1_drums_patch_default(&p->drums, 0);     /* present = false: the drums stay as they are */
+#endif
 }
 
 /* ---- writing ---- */

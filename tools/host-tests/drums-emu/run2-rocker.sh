@@ -35,6 +35,6 @@ $H --ms 27000 \
   --expect "RESTS ring out" --expect "RESTS choke" --expect "MODULE marbles" \
   --expect "RESTS writing every drum" --expect "RANGE t x4" --expect "RANGE t x1" \
   --expect "RESTS clear every drum at the next bar" --expect "CLOCK stop" \
-  --expect "STEP Marbles one tick" --expect "HIT drums" --expect "AUDITION drum 2" \
+  --expect "STEP one 16th" --expect "HIT drums" --expect "AUDITION drum 2" \
   --expect "BURST on" --expect "BURST off" \
   $EV

@@ -49,6 +49,9 @@ void sp1_drums_model_at(int i, uint8_t *eng, uint8_t *model);
 int  sp1_drums_model_index(uint8_t eng, uint8_t model);       /* -1 if not on the list */
 const char *sp1_drums_model_name(uint8_t eng, uint8_t model);
 bool sp1_drums_model_unique(uint8_t eng);                     /* one instance per kit (classic) */
+bool sp1_drums_model_ok(uint8_t eng, uint8_t model);          /* this build has it          */
+/* The natural length (16 or 32 steps) of the maps kit `bank` gives slot `slot`. */
+int  sp1_drums_map_len(int bank, int slot);
 
 void sp1_drums_init(void);
 
@@ -80,6 +83,7 @@ struct sp1_drums_status {
 	uint8_t  last_hits;       /* voices struck on the last step that struck any   */
 	uint16_t rests[SP1_DRUMS_N];   /* per slot, bit = 16th of the bar             */
 	uint32_t hits;            /* voices struck since boot                          */
+	uint32_t bass_notes;      /* bass notes since boot                             */
 };
 void sp1_drums_status(struct sp1_drums_status *out);
 

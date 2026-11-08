@@ -182,6 +182,12 @@ struct sp1_audio_cfg;
 struct sp1_midi_cfg;
 bool sp1_store_cnfg(const struct sp1_audio_cfg **audio, const struct sp1_midi_cfg **midi);
 #endif
+#if defined(CONFIG_SP1_DRUMS)
+/* Main, at ON entry with audio.cnfg: drums.cnfg as this ON's job read it (sp1_drums_patch.h);
+ * false if the job has not got that far (keep the settings in use). */
+bool sp1_store_drums_cfg(const struct sp1_drums_cfg **c);
+#endif
+
 /* Main, at shutdown when no PRST save is queued: the log's last lines, then the card off. */
 void sp1_store_log_end(void);
 

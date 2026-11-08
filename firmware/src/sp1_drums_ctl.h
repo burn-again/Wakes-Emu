@@ -39,8 +39,59 @@ struct sp1_drums_ctl {
 	uint8_t rest_choke;           /* 1: a rest chokes what rings; 0: it rings out          */
 	uint32_t rest_clear_seq;
 	uint32_t rotate_seq;          /* each increment: rotate the kit one slot, on the beat */
-	uint32_t step_seq;            /* each increment while stopped: Marbles one tick       */
+	uint32_t step_seq;            /* each increment while stopped: Marbles one 16th       */
 	float speed;                  /* tape slow: the machine's speed, 1 = normal            */
+	uint8_t rotate_q;             /* a rotation lands on the next: 0 step, 1 beat, 2 bar   */
+
+	/* ---- the sequencer (step 3), per slot ---- */
+	uint8_t pat[SP1_DRUMS_N];     /* the map pair (A, B) from the bank: a kit's index     */
+	uint8_t len[SP1_DRUMS_N];     /* steps in the loop: 8, 12, 16, 24 or 32               */
+	float density[SP1_DRUMS_N];   /* 0..1: which weights play                              */
+	float fill;                   /* -0.5..+0.5, added to every slot's density             */
+	float morph;                  /* 0..1: map A -> map B                                  */
+	float swing;                  /* 0..1: odd 16ths late by up to a third of a step       */
+	float jitter;                 /* Marbles' t JITTER: threshold jitter, per-hit wobble   */
+	float deja;                   /* Marbles' t DEJA VU: 0.5 and up = the jitter repeats   */
+
+	/* ---- Marbles' cables (step 3) ----
+	 * t_dest: t1, t2, t3, the Y clock -> enum sp1_drums_tdest.
+	 * x_dest: X1, X2, X3, Y -> enum sp1_drums_xdest; depth -1..+1 each (X SHIFT F1-F3,
+	 * t SHIFT F1); lo / hi: the volts each of the four outputs spans now (its range). */
+	uint8_t t_dest[4], x_dest[4];
+	float depth[4], lo[4], hi[4];
+	uint8_t y_ticks;              /* the Y clock: one tick per this many t2 ticks          */
+
+	/* ---- the bass (step 4) ---- */
+	uint8_t bass_mode;            /* enum sp1_drums_bass                                   */
+	uint8_t bass_octaves;         /* how many octaves of the scale Y spreads over          */
+	float bass_root;              /* MIDI note of its lowest degree                        */
+	float bass_level;             /* linear gain                                           */
+	float bass_p[8];              /* tinybass: shape, cutoff, res, env, decay, glide, sub, octave */
+	uint8_t n_deg;                /* the scale: degrees in semitones above the root        */
+	float degrees[12];
+	float period;                 /* its period (12 for an octave)                         */
 };
+
+/* Where a t output (or the Y clock) goes. */
+enum sp1_drums_tdest {
+	SP1_DT_NONE = 0,
+	SP1_DT_SLOT1, SP1_DT_SLOT2, SP1_DT_SLOT3, SP1_DT_SLOT4,
+	SP1_DT_BASS,                  /* strike the bass                                       */
+	SP1_DT_ACCENT,                /* whatever plays on that tick is louder                 */
+	SP1_DT_COUNT
+};
+
+/* Where an X output (or Y) goes. The "own slot" four act on the slot that output's t
+ * partner plays (X1 with t1 ...), sampled at each hit. */
+enum sp1_drums_xdest {
+	SP1_DX_NONE = 0,
+	SP1_DX_PITCH, SP1_DX_TONE, SP1_DX_DECAY, SP1_DX_VEL,        /* own slot          */
+	SP1_DX_KIT_PITCH, SP1_DX_KIT_TONE, SP1_DX_KIT_DECAY, SP1_DX_FILL,
+	SP1_DX_FILTER, SP1_DX_FOLD, SP1_DX_CHEBY, SP1_DX_FM,
+	SP1_DX_BASS_NOTE,             /* Y only                                                 */
+	SP1_DX_COUNT
+};
+
+enum sp1_drums_bass { SP1_BASS_OFF = 0, SP1_BASS_Y, SP1_BASS_RESTS, SP1_BASS_MODES };
 
 #endif

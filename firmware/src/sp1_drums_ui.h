@@ -37,6 +37,7 @@
 #include <stdint.h>
 
 #include "sp1_drums_ctl.h"
+#include "sp1_drums_patch.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -90,6 +91,35 @@ enum sp1_dui_page sp1_dui_page(void);
 bool sp1_dui_shift(void);
 const char *sp1_dui_page_name(enum sp1_dui_page p);
 int  sp1_dui_kit(void);
+
+/* ---- Marbles' side: what main reads from the MARBLES module every tick ---- */
+struct sp1_dui_marbles {
+	float depth[4];               /* X1..X3 (X SHIFT F1-F3), Y (t SHIFT F1): -1..+1      */
+	float jitter, deja;           /* t JITTER, t DEJA VU, 0..1                            */
+	int   y_div;                  /* Y's divider, 0..11 (Marbles' table)                  */
+	int   x_range, y_range;       /* [J], enum sp1_mrb_range                              */
+	int   n_deg;                  /* Marbles' selected scale, for the bass                */
+	float degrees[12];
+	float period;
+};
+void sp1_dui_marbles(const struct sp1_dui_marbles *m);
+
+/* ---- the cables (MARBLES' "••" + T1-T4) ----
+ * out 0..3 = t1, t2, t3, the Y clock (t page); 4..7 = X1, X2, X3, Y (X page). */
+void sp1_dui_cable_step(int out);
+int  sp1_dui_cable_unpatch(int out);          /* 1 if something was patched           */
+uint8_t sp1_dui_cable(int out);
+void sp1_dui_cable_glyph(int out, uint8_t lv[4]);
+const char *sp1_dui_cable_name(int out);
+const char *sp1_dui_output_name(int out);
+/* The PLAITS destination (enum sp1_mui_dest) whose INTELLIGENT range suits output k
+ * (X1..X3, Y): main hands these to Marbles in place of the PLAITS routing. */
+uint8_t sp1_dui_range_dest(int k);
+
+/* ---- drums.cnfg and presets ---- */
+void sp1_dui_set_cfg(const struct sp1_drums_cfg *c);   /* each ON, before the preset    */
+void sp1_dui_get(struct sp1_drums_patch *p);
+void sp1_dui_put(const struct sp1_drums_patch *p);     /* no [drums]: nothing changes   */
 
 /* "••" + PLAY held 3 s on the drum pages: the current kit as stored, FX at zero (on),
  * SETTINGS at defaults, nothing muted, every rest cleared, rests choke. */

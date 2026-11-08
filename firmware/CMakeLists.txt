@@ -435,7 +435,8 @@ if(CONFIG_SP1_PLAITS)
 	# ---- drum firmware, stage 1 (CONFIG_SP1_DRUMS): the kit, its FX and bass (MIT) ----
 	if(CONFIG_SP1_DRUMS)
 		set(TINYKIT ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/tinykit)
-		zephyr_library_sources(src/sp1_drums.cc src/sp1_drums_ui.c ${TINYKIT}/tinykit.c ${TINYKIT}/tinyfx.c
+		zephyr_library_sources(src/sp1_drums.cc src/sp1_drums_ui.c src/sp1_drums_patch.c
+			${TINYKIT}/tinykit.c ${TINYKIT}/tinyfx.c
 			${TINYKIT}/tinybass.c)
 		zephyr_library_include_directories(${TINYKIT})
 		# The "classic" voices (CONFIG_SP1_CLASSIC): GPL-3.0, all in third_party/tinykit/lxr.

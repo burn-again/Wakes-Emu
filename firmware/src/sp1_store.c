@@ -368,6 +368,7 @@ static struct sp1_logs_cfg logs_cfg;
 #define MISSING_AUDIO   0x4u
 #define MISSING_MIDI    0x8u
 #define MISSING_SCALES  0x10u
+#define MISSING_DRUMS   0x20u
 static uint8_t cnfg_missing;
 
 static void cnfg_problem(void *ctx, int line, const char *what, const char *why)
@@ -494,6 +495,39 @@ static void cnfg_load_engines(void)
 #endif
 
 #if defined(CONFIG_SP1_PLAITS)
+#if defined(CONFIG_SP1_DRUMS)
+/* drums.cnfg (sp1_drums_patch.h): line by line over the built-in values. */
+#define DRUMS_CNFG    DIR_CNFG "/drums.cnfg"
+static struct sp1_drums_cfg st_drums;
+
+static void drums_feed(void *r, const char *t, size_t n)
+{
+	sp1_drums_cfg_feed(r, t, n);
+}
+
+static void cnfg_load_drums(void)
+{
+	static struct sp1_drums_cfg_reader rd;
+	sp1_drums_cfg_begin(&rd, &st_drums, cnfg_problem, (void *)"drums.cnfg");
+	size_t got;
+	bool rerr;
+	const int rc = cnfg_read(DRUMS_CNFG, drums_feed, &rd, &got, &rerr);
+	if (rc != 0) {
+		sp1_drums_cfg_defaults(&st_drums);
+		if (rc == -ENOENT) {
+			cnfg_missing |= MISSING_DRUMS;
+		}
+		LINE("CNFG drums.cnfg: %s -- the built-in settings\n",
+		     rc == -ENOENT ? "not on the drive (a copy goes there)" : "cannot be opened");
+		return;
+	}
+	const int bad = sp1_drums_cfg_end(&rd);
+	LINE("CNFG drums.cnfg: %u B read%s, %d problem%s%s\n", (unsigned)got,
+	     rerr ? " (then a read error)" : (got >= CNFG_READ_MAX ? " (the rest ignored)" : ""),
+	     bad, bad == 1 ? "" : "s", bad ? " -- those lines keep their defaults" : "");
+}
+#endif
+
 /* audio.cnfg and midi.cnfg land here; main takes them at ON entry, before audio starts
  * (sp1_store_cnfg). `cnfg_ready` says the ON job has finished writing them this ON. */
 static struct sp1_audio_cfg st_audio;
@@ -661,6 +695,9 @@ static void cnfg_defaults(void)
 	sp1_audio_cfg_defaults(&st_audio);
 	sp1_midi_cfg_defaults(&st_midi);
 	sp1_scales_defaults(&st_scales);         /* staged: scales_commit installs it */
+#if defined(CONFIG_SP1_DRUMS)
+	sp1_drums_cfg_defaults(&st_drums);
+#endif
 	atomic_set(&cnfg_ready, 1);
 #endif
 }
@@ -684,6 +721,11 @@ static void cnfg_load(void)
 	if (!stop) {
 		cnfg_load_scales();
 	}
+#if defined(CONFIG_SP1_DRUMS)
+	if (!stop) {
+		cnfg_load_drums();
+	}
+#endif
 	atomic_set(&cnfg_ready, 1);
 #endif
 }
@@ -736,6 +778,12 @@ static void cnfg_create_missing(void)
 		(void)cnfg_write_one(SCALES_CNFG, "scales.cnfg", SP1_SCALES_TEMPLATE,
 				     sizeof(SP1_SCALES_TEMPLATE) - 1u);
 	}
+#if defined(CONFIG_SP1_DRUMS)
+	if ((cnfg_missing & MISSING_DRUMS) && !stop) {
+		(void)cnfg_write_one(DRUMS_CNFG, "drums.cnfg", SP1_DRUMS_CNFG_TEMPLATE,
+				     SP1_DRUMS_CNFG_TEMPLATE_LEN);
+	}
+#endif
 #endif
 	cnfg_missing = 0u;
 }
@@ -1499,6 +1547,18 @@ static int load_slot(int i)
 		return rc;
 	}
 	sp1_prst_parse(load_text, n, &prst_slot[i], &r);
+#if defined(CONFIG_SP1_DRUMS)
+	{
+		/* the drum firmware's [drums] section, if the slot has one (sp1_drums_patch.h) */
+		struct sp1_drums_patch *dp = &prst_slot[i].drums;
+		sp1_drums_patch_default(dp, 0);
+		const int dbad = sp1_drums_patch_parse(load_text, n, dp);
+		if (dp->present) {
+			LINE("STORE PRST %d: [drums] kit %d, %d bad field%s\n", i + 1, dp->kit + 1,
+			     dbad, dbad == 1 ? "" : "s");
+		}
+	}
+#endif
 	if (!r.format_ok) {
 		LINE("STORE PRST %d: %s -- format %d is not %d: the ROTC defaults\n", i + 1, best,
 		     r.format, sp1_prst_format());
@@ -1983,10 +2043,20 @@ bool sp1_store_prst_save(int slot, const struct sp1_prst *p)
 	    slot >= SP1_PRST_SLOTS) {
 		return false;
 	}
-	const int n = sp1_prst_write(p, save_text, sizeof(save_text));
+	int n = sp1_prst_write(p, save_text, sizeof(save_text));
 	if (n < 0) {
 		return false;
 	}
+#if defined(CONFIG_SP1_DRUMS)
+	{
+		const int d = sp1_drums_patch_write(&p->drums, save_text + n,
+						    sizeof(save_text) - (size_t)n);
+		if (d < 0) {
+			return false;
+		}
+		n += d;
+	}
+#endif
 	save_len = (size_t)n;
 	save_slot = slot;
 	prst_slot[slot] = *p;
@@ -2007,6 +2077,14 @@ bool sp1_store_cnfg(const struct sp1_audio_cfg **audio, const struct sp1_midi_cf
 {
 	*audio = &st_audio;
 	*midi = &st_midi;
+	return atomic_get(&cnfg_ready) != 0;
+}
+#endif
+
+#if defined(CONFIG_SP1_DRUMS)
+bool sp1_store_drums_cfg(const struct sp1_drums_cfg **c)
+{
+	*c = &st_drums;
 	return atomic_get(&cnfg_ready) != 0;
 }
 #endif

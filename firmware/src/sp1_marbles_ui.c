@@ -212,6 +212,9 @@ static bool is_bipolar(enum sp1_mui_layer l, int i)
 	case SP1_MUI_T_SHIFT: return i == 0;             /* GTLT (issue #20) */
 	case SP1_MUI_X_BASE: return i >= 1;
 	case SP1_MUI_Y:      return i == 1 || i == 2;
+#if defined(CONFIG_SP1_DRUMS)
+	case SP1_MUI_X_SHIFT: return i <= 2;             /* the drum firmware: cable depth */
+#endif
 	default:             return false;
 	}
 }
@@ -221,7 +224,13 @@ static bool is_bipolar(enum sp1_mui_layer l, int i)
  * it when it became GTLT (issue #20). */
 static bool is_reserved(enum sp1_mui_layer l, int i)
 {
+#if defined(CONFIG_SP1_DRUMS)
+	(void)l;
+	(void)i;
+	return false;              /* X SHIFT F1-F3 are the drum firmware's cable depths */
+#else
 	return l == SP1_MUI_X_SHIFT && i <= 2;
+#endif
 }
 
 static enum sp1_mui_layer base_of(enum sp1_mui_page p)
@@ -247,9 +256,16 @@ static void defaults_pages(struct sp1_mui_patch *p)
 	p->v[SP1_MUI_T_SHIFT][1] = 0.5f;       /* gate length 128/256 (Marbles)   */
 	p->v[SP1_MUI_T_SHIFT][2] = 0.0f;       /* no randomness                   */
 	p->v[SP1_MUI_T_SHIFT][3] = DEF_LENGTH;
+#if defined(CONFIG_SP1_DRUMS)
+	/* X1-X3 cable depth in the drum firmware: centred = 0 */
+	p->v[SP1_MUI_X_SHIFT][0] = 0.5f;
+	p->v[SP1_MUI_X_SHIFT][1] = 0.5f;
+	p->v[SP1_MUI_X_SHIFT][2] = 0.5f;
+#else
 	p->v[SP1_MUI_X_SHIFT][0] = 0.0f;                 /* reserved (M4a)        */
 	p->v[SP1_MUI_X_SHIFT][1] = 0.0f;                 /* reserved (M4a)        */
 	p->v[SP1_MUI_X_SHIFT][2] = 0.0f;                 /* reserved              */
+#endif
 	/* X_SHIFT[3] is not a slot: F4 there addresses T_SHIFT[3] (LENGTH), see canon(). */
 	p->v[SP1_MUI_X_SHIFT][3] = 0.0f;
 	p->v[SP1_MUI_Y][0] = 0.5f;                       /* Marbles: 128/256      */
@@ -805,6 +821,16 @@ void sp1_mui_routing(struct sp1_mui_routing *out)
 	out->gtlt = gtlt_tilt();
 }
 
+#if defined(CONFIG_SP1_DRUMS)
+float sp1_mui_x_depth(int i)
+{
+	if (i < 0 || i > 2) {
+		return 0.0f;
+	}
+	return 2.0f * detent(stored[SP1_MUI_X_SHIFT][i], DETENT_BIPOLAR) - 1.0f;
+}
+#endif
+
 float sp1_mui_bpm(void)
 {
 	return sp1_marbles_bpm(rate_of(stored[SP1_MUI_T_BASE][0]), t_range);
@@ -831,7 +857,11 @@ static void leds_of(enum sp1_mui_layer l, uint8_t out[4])
 			 * gates are off. On the detent every gain is 1, so this is the old
 			 * on/off display exactly. */
 			const uint8_t g = sp1_marbles_last_gates();
+#if defined(CONFIG_SP1_DRUMS)
+			const float tilt = 0.0f;   /* t SHIFT F1 is Y's cable depth, not GTLT */
+#else
 			const float tilt = gtlt_tilt();
+#endif
 			for (int i = 0; i < 3; i++) {
 				const float x = SP1_GTLT_LED_FLOOR +
 					(1.0f - SP1_GTLT_LED_FLOOR) * sp1_gtlt_gain(tilt, i);

@@ -6,7 +6,8 @@
 #include "sp1_drums_ui.h"
 
 #include "sp1_controls.h"    /* enum sp1_button: the bits of sp1_dui_keys' masks */
-#include "sp1_drums.h"       /* the kits and the model list                       */
+#include "sp1_drums.h"       /* the kits, the model list, the map bank            */
+#include "sp1_drums_patch.h" /* the state a preset holds, drums.cnfg              */
 #include "sp1_ui_timing.h"   /* SP1_ENGINE_LED_FULL / HALF                        */
 
 #include <math.h>
@@ -26,20 +27,23 @@
 #define TAP_GAP_MS      400u     /* the next tap must START within this of the last ending */
 #define BREATH_MS       1200u
 #define CLEAR_TAP_MS    300u     /* an FFWD press this short is a tap: clear at the bar   */
-/* Tape slow (drums.cnfg in step 4): the floor, the fall's time constant, the way back. */
-#define TAPE_FLOOR      0.33f
-#define TAPE_FALL_MS    700.0f
-#define TAPE_RELEASE_MS 1200.0f
 
-/* Layers: two per page, base and SHIFT. SETTINGS + SHIFT shows KIT + SHIFT (the FX). */
-#define LAYERS          (2 * SP1_DUI_PAGES)
+/* Layers: two per page, base and SHIFT -- the same twelve a preset holds. */
+#define LAYERS          SP1_DRUMS_LAYERS
 #define L_KIT           0
 #define L_KIT_SH        1
 #define L_DRUM(n)       (2 + 2 * (n))
 #define L_DRUM_SH(n)    (3 + 2 * (n))
 #define L_SET           10
+#define L_SET_SH        11       /* the bass */
 
-static float stored[LAYERS][4];
+/* Everything a preset holds (sp1_drums_patch.h): the kit, the voices, the twelve layers'
+ * values, FX, mutes, rests, the bass mode, the patterns and the cables. */
+static struct sp1_drums_patch pt;
+#define stored pt.v
+/* drums.cnfg */
+static struct sp1_drums_cfg cfg;
+static bool cfg_applied;
 static bool  catching[LAYERS][4];
 static float pos[4], prev[4], now01[4], lock_ref[4];
 static bool  locked[4];
@@ -57,15 +61,10 @@ static int      tap_count;
 static uint32_t breath_ms;
 static bool     shift_shown;
 
-/* the kit */
-static int     kit;
-static uint8_t eng[4], model[4];
-static float   def_gain[4];
-static uint8_t melodic, mute;
-static uint8_t fx_on = 0x0Fu;
+/* Marbles' side of the controls (sp1_dui_marbles) */
+static struct sp1_dui_marbles mrb;
 
 /* the rocker */
-static uint8_t  rest_choke = 1u;
 static uint32_t rest_clear_seq, rotate_seq, step_seq;
 static uint8_t  rest_clear;
 static uint8_t  rest_write, rest_erase;
@@ -100,8 +99,17 @@ static float detent(float p, float w)
 
 static bool bipolar(int l, int i)
 {
-	return l == L_KIT || (l == L_KIT_SH && i == 0);
+	return l == L_KIT || (l == L_KIT_SH && i == 0);   /* KIT's offsets and fill, the filter */
 }
+
+/* DRUM n + SHIFT F3 (the loop length) and the bass octave: zones of their faders. */
+static const uint8_t kLen[5] = { 8, 12, 16, 24, 32 };
+static int zone(float v, int n)
+{
+	int z = (int)(clamp01(v) * (float)n);
+	return z < 0 ? 0 : (z > n - 1 ? n - 1 : z);
+}
+static float zone_value(int z, int n) { return ((float)z + 0.5f) / (float)n; }
 
 __attribute__((format(printf, 1, 2)))
 static void LOG(const char *fmt, ...)
@@ -126,7 +134,7 @@ static void flash(const uint8_t lv[4])
 static int layer_of(enum sp1_dui_page p, bool shift)
 {
 	if (p == SP1_DUI_SETTINGS) {
-		return shift ? L_KIT_SH : L_SET;
+		return shift ? L_SET_SH : L_SET;
 	}
 	return 2 * (int)p + (shift ? 1 : 0);
 }
@@ -175,63 +183,38 @@ static void go(enum sp1_dui_page p, bool fnc)
 }
 
 /* ---- the kit ---- */
-static void defaults_set(void)
-{
-	stored[L_SET][0] = 0.0f;        /* swing                  */
-	stored[L_SET][1] = 0.0f;        /* morph                  */
-	stored[L_SET][2] = 0.5f;        /* FM carrier: G3         */
-	stored[L_SET][3] = 0.0f;        /* bus drive: unity       */
-}
-
-static void defaults_fx(void)
-{
-	stored[L_KIT_SH][0] = 0.5f;     /* DJ filter: centre = off */
-	stored[L_KIT_SH][1] = 0.0f;
-	stored[L_KIT_SH][2] = 0.0f;
-	stored[L_KIT_SH][3] = 0.0f;
-	fx_on = 0x0Fu;
-}
-
-static void defaults_kit_page(void)
-{
-	for (int i = 0; i < 4; i++) {
-		stored[L_KIT][i] = 0.5f;
-	}
-}
-
 void sp1_dui_load_kit(int k)
 {
-	kit = ((k % SP1_DRUMS_KITS) + SP1_DRUMS_KITS) % SP1_DRUMS_KITS;
-	melodic = 0u;
+	/* A kit brings its voices, their drum pages and its maps; the KIT page, the FX, SETTINGS,
+	 * the bass, the mutes and the cables are left as they are. */
+	struct sp1_drums_patch d;
+	sp1_drums_patch_default(&d, k);
+	pt.kit = d.kit;
+	pt.melodic = d.melodic;
 	for (int v = 0; v < 4; v++) {
-		struct sp1_drums_voice_def d;
-		sp1_drums_kit_voice(kit, v, &d);
-		eng[v] = d.eng;
-		model[v] = d.model;
-		def_gain[v] = d.gain;
-		if (d.melodic) {
-			melodic |= (uint8_t)(1u << v);
-		}
-		stored[L_DRUM(v)][0] = clamp01(d.note / 120.0f);
-		stored[L_DRUM(v)][1] = d.tone;
-		stored[L_DRUM(v)][2] = d.decay;
-		stored[L_DRUM(v)][3] = d.mod;
-		stored[L_DRUM_SH(v)][0] = 0.5f;      /* density (step 3)      */
-		stored[L_DRUM_SH(v)][1] = 0.5f;      /* level: the kit's gain */
-		stored[L_DRUM_SH(v)][2] = 0.5f;      /* length (step 3)       */
-		stored[L_DRUM_SH(v)][3] = d.excite;
+		pt.eng[v] = d.eng[v];
+		pt.model[v] = d.model[v];
+		pt.gain[v] = d.gain[v];
+		pt.pat[v] = d.pat[v];
+		memcpy(stored[L_DRUM(v)], d.v[L_DRUM(v)], sizeof stored[0]);
+		memcpy(stored[L_DRUM_SH(v)], d.v[L_DRUM_SH(v)], sizeof stored[0]);
 	}
+	pickup_all();
+}
+
+static void defaults(int k)
+{
+	sp1_drums_patch_default(&pt, k);
+	pt.rest_choke = (uint8_t)(cfg.rest_choke ? 1 : 0);
+	pt.bass_mode = (uint8_t)cfg.bass_mode;
 	pickup_all();
 }
 
 void sp1_dui_init(void)
 {
-	defaults_kit_page();
-	defaults_fx();
-	defaults_set();
-	sp1_dui_load_kit(0);
-	mute = 0u;
-	rest_choke = 1u;
+	sp1_drums_cfg_defaults(&cfg);
+	cfg_applied = false;
+	defaults(0);
 	page = came_from = SP1_DUI_KIT;
 	active = L_KIT;
 	speed = 1.0f;
@@ -239,14 +222,35 @@ void sp1_dui_init(void)
 
 void sp1_dui_rip(void)
 {
-	defaults_kit_page();
-	defaults_fx();
-	defaults_set();
-	sp1_dui_load_kit(kit);
-	mute = 0u;
-	rest_choke = 1u;
+	defaults(pt.kit);
 	rest_clear = 0x0Fu;
 	rest_clear_seq++;
+}
+
+void sp1_dui_set_cfg(const struct sp1_drums_cfg *c)
+{
+	cfg = *c;
+	if (!cfg_applied) {
+		/* The power-on choices, once per boot and before any preset: a preset with drums
+		 * of its own then replaces them (sp1_dui_put). */
+		cfg_applied = true;
+		defaults(cfg.kit);
+	}
+}
+
+void sp1_dui_get(struct sp1_drums_patch *p)
+{
+	*p = pt;
+	p->present = true;
+}
+
+void sp1_dui_put(const struct sp1_drums_patch *p)
+{
+	if (!p->present) {
+		return;                       /* a slot with no drums: they stay as they are */
+	}
+	pt = *p;
+	pickup_all();
 }
 
 static void enter_common(const uint16_t raw[4], bool fnc)
@@ -413,7 +417,7 @@ static void mask_glyph(uint8_t m, uint8_t lv[4])
 static void model_step(int v, int dir)
 {
 	const int n = sp1_drums_models();
-	int i = sp1_drums_model_index(eng[v], model[v]);
+	int i = sp1_drums_model_index(pt.eng[v], pt.model[v]);
 	for (int tries = 0; tries < n; tries++) {
 		i = (i < 0) ? (dir > 0 ? 0 : n - 1) : (i + (dir > 0 ? 1 : n - 1)) % n;
 		uint8_t e, m;
@@ -421,12 +425,12 @@ static void model_step(int v, int dir)
 		bool taken = false;
 		if (sp1_drums_model_unique(e)) {
 			for (int o = 0; o < 4; o++) {
-				taken = taken || (o != v && eng[o] == e && model[o] == m);
+				taken = taken || (o != v && pt.eng[o] == e && pt.model[o] == m);
 			}
 		}
 		if (!taken) {
-			eng[v] = e;
-			model[v] = m;
+			pt.eng[v] = e;
+			pt.model[v] = m;
 			break;
 		}
 	}
@@ -439,8 +443,161 @@ static void model_step(int v, int dir)
 	}
 	lv[0] = lv[0] ? lv[0] : SP1_ENGINE_LED_HALF;
 	flash(lv);
-	LOG("MODEL drum %d: %s (%d of %d)\n", v + 1, sp1_drums_model_name(eng[v], model[v]),
+	LOG("MODEL drum %d: %s (%d of %d)\n", v + 1, sp1_drums_model_name(pt.eng[v], pt.model[v]),
 	    (i < 0 ? 0 : i) + 1, n);
+}
+
+/* SETTINGS "••" + Tn: drum n's maps from the next kit's pattern for that slot. The loop
+ * length follows the new map's own (pickup catches DRUM n + SHIFT F3 up). */
+static void pattern_step(int n)
+{
+	pt.pat[n] = (uint8_t)((pt.pat[n] + 1u) % SP1_DRUMS_KITS);
+	const int len = sp1_drums_map_len(pt.pat[n], n);
+	int z = 2;
+	for (int i = 0; i < 5; i++) {
+		if (kLen[i] == len) {
+			z = i;
+		}
+	}
+	stored[L_DRUM_SH(n)][2] = zone_value(z, 5);
+	catching[L_DRUM_SH(n)][2] = fabsf(stored[L_DRUM_SH(n)][2] - pos[2]) >= CATCH_MATCH;
+	uint8_t lv[4];
+	kit_glyph(pt.pat[n], lv);
+	flash(lv);
+	LOG("PATTERN drum %d: %s's (%d steps)\n", n + 1, sp1_drums_kit_name(pt.pat[n]), len);
+}
+
+/* ---- Marbles' cables ----
+ * out 0..3: t1, t2, t3, the Y clock (MARBLES t page, "••" + T1-T4); 4..7: X1, X2, X3, Y (the X
+ * page). Each output steps round its own ring. */
+static const uint8_t kTRing[] = { SP1_DT_NONE, SP1_DT_SLOT1, SP1_DT_SLOT2, SP1_DT_SLOT3,
+				  SP1_DT_SLOT4, SP1_DT_BASS, SP1_DT_ACCENT };
+static const uint8_t kXRing[] = { SP1_DX_NONE, SP1_DX_PITCH, SP1_DX_TONE, SP1_DX_DECAY,
+				  SP1_DX_VEL, SP1_DX_KIT_PITCH, SP1_DX_KIT_TONE, SP1_DX_KIT_DECAY,
+				  SP1_DX_FILL, SP1_DX_FILTER, SP1_DX_FOLD, SP1_DX_CHEBY, SP1_DX_FM };
+static const uint8_t kYRing[] = { SP1_DX_NONE, SP1_DX_BASS_NOTE, SP1_DX_KIT_TONE,
+				  SP1_DX_KIT_DECAY, SP1_DX_FILL, SP1_DX_FILTER, SP1_DX_FOLD,
+				  SP1_DX_CHEBY, SP1_DX_FM };
+
+static uint8_t *cable(int out)
+{
+	return out < 4 ? &pt.t_dest[out & 3] : &pt.x_dest[(out - 4) & 3];
+}
+
+static uint8_t ring_next(const uint8_t *ring, int n, uint8_t cur)
+{
+	for (int i = 0; i < n; i++) {
+		if (ring[i] == cur) {
+			return ring[(i + 1) % n];
+		}
+	}
+	return ring[0];
+}
+
+void sp1_dui_cable_step(int out)
+{
+	if (out < 0 || out > 7) {
+		return;
+	}
+	uint8_t *c = cable(out);
+	if (out < 4) {
+		*c = ring_next(kTRing, (int)sizeof kTRing, *c);
+	} else if (out < 7) {
+		*c = ring_next(kXRing, (int)sizeof kXRing, *c);
+	} else {
+		*c = ring_next(kYRing, (int)sizeof kYRing, *c);
+	}
+}
+
+int sp1_dui_cable_unpatch(int out)
+{
+	if (out < 0 || out > 7) {
+		return 0;
+	}
+	uint8_t *c = cable(out);
+	const int had = *c != 0u;
+	*c = 0u;
+	return had;
+}
+
+uint8_t sp1_dui_cable(int out)
+{
+	return (out >= 0 && out <= 7) ? *cable(out) : 0u;
+}
+
+void sp1_dui_cable_glyph(int out, uint8_t lv[4])
+{
+	const uint8_t F = SP1_ENGINE_LED_FULL, H = SP1_ENGINE_LED_HALF;
+	for (int i = 0; i < 4; i++) {
+		lv[i] = 0u;
+	}
+	const uint8_t d = sp1_dui_cable(out);
+	if (out < 4) {
+		if (d >= SP1_DT_SLOT1 && d <= SP1_DT_SLOT4) {
+			lv[d - SP1_DT_SLOT1] = F;                  /* the slot's LED            */
+		} else if (d == SP1_DT_BASS) {
+			lv[0] = lv[3] = F;                         /* ends                      */
+		} else if (d == SP1_DT_ACCENT) {
+			lv[0] = lv[1] = lv[2] = lv[3] = H;         /* all four at half          */
+		}
+		return;
+	}
+	if (d >= SP1_DX_PITCH && d <= SP1_DX_VEL) {
+		lv[d - SP1_DX_PITCH] = H;                          /* own slot: one at half     */
+	} else if (d >= SP1_DX_KIT_PITCH && d <= SP1_DX_FILL) {
+		lv[d - SP1_DX_KIT_PITCH] = F;                      /* KIT: one full             */
+	} else if (d >= SP1_DX_FILTER && d <= SP1_DX_FM) {
+		for (int i = 0; i < 4; i++) {
+			lv[i] = H;                                 /* FX: one full, rest half   */
+		}
+		lv[d - SP1_DX_FILTER] = F;
+	} else if (d == SP1_DX_BASS_NOTE) {
+		lv[0] = lv[3] = F;
+	}
+}
+
+const char *sp1_dui_cable_name(int out)
+{
+	static const char *const tn[SP1_DT_COUNT] = { "none", "slot 1", "slot 2", "slot 3",
+						      "slot 4", "bass", "accent" };
+	static const char *const xn[SP1_DX_COUNT] = {
+		"none", "its slot's pitch", "its slot's tone", "its slot's decay",
+		"its slot's velocity", "KIT pitch", "KIT tone", "KIT decay", "fill",
+		"FX filter", "FX fold", "FX Chebyshev", "FX FM", "bass note" };
+	const uint8_t d = sp1_dui_cable(out);
+	if (out < 4) {
+		return d < SP1_DT_COUNT ? tn[d] : "?";
+	}
+	return d < SP1_DX_COUNT ? xn[d] : "?";
+}
+
+const char *sp1_dui_output_name(int out)
+{
+	static const char *const on[8] = { "t1", "t2", "t3", "Y clock", "X1", "X2", "X3", "Y" };
+	return (out >= 0 && out <= 7) ? on[out] : "?";
+}
+
+/* The Plaits destination whose INTELLIGENT range suits what output k (X1..X3, Y) is cabled
+ * to: a pitch two octaves (V/Oct, 0..2 V), a centred amount +-5 V (FM), a push 0..5 V
+ * (LEVEL). Main hands it to Marbles in place of the PLAITS routing. */
+uint8_t sp1_dui_range_dest(int k)
+{
+	switch (sp1_dui_cable(4 + (k & 3))) {
+	case SP1_DX_PITCH: case SP1_DX_BASS_NOTE:
+		return 5u;                                       /* SP1_DEST_VOCT  */
+	case SP1_DX_TONE: case SP1_DX_DECAY: case SP1_DX_KIT_PITCH: case SP1_DX_KIT_TONE:
+	case SP1_DX_KIT_DECAY: case SP1_DX_FILTER:
+		return 1u;                                       /* SP1_DEST_FM    */
+	case SP1_DX_VEL: case SP1_DX_FILL: case SP1_DX_FOLD: case SP1_DX_CHEBY: case SP1_DX_FM:
+		return 6u;                                       /* SP1_DEST_LEVEL */
+	default:
+		return 0u;                                       /* SP1_DEST_NONE  */
+	}
+}
+
+void sp1_dui_marbles(const struct sp1_dui_marbles *m)
+{
+	mrb = *m;
 }
 
 uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
@@ -465,22 +622,24 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 			if (!(k->pressed & BIT(SP1_BTN_T1 + n))) {
 				continue;
 			}
-			if (fnc) {
-				if (!on_set) {
-					fx_on ^= (uint8_t)(1u << n);
+			if (fnc && on_set) {
+				pattern_step(n);
+			} else if (fnc) {
+				{
+					pt.fx_on ^= (uint8_t)(1u << n);
 					uint8_t lv[4];
-					mask_glyph(fx_on, lv);
+					mask_glyph(pt.fx_on, lv);
 					flash(lv);
 					static const char *const fxn[4] = { "DJ filter", "fold",
 									    "Chebyshev", "FM" };
-					LOG("FX %s %s\n", fxn[n], (fx_on & (1u << n)) ? "on" : "off");
+					LOG("FX %s %s\n", fxn[n], (pt.fx_on & (1u << n)) ? "on" : "off");
 				}
 			} else if (on_set) {
-				mute ^= (uint8_t)(1u << n);
+				pt.mute ^= (uint8_t)(1u << n);
 				uint8_t lv[4];
-				mask_glyph((uint8_t)~mute, lv);
+				mask_glyph((uint8_t)~pt.mute, lv);
 				flash(lv);
-				LOG("MUTE drum %d %s\n", n + 1, (mute & (1u << n)) ? "muted" : "playing");
+				LOG("MUTE drum %d %s\n", n + 1, (pt.mute & (1u << n)) ? "muted" : "playing");
 			} else {
 				const enum sp1_dui_page to = ((int)page == SP1_DUI_DRUM1 + n)
 					? SP1_DUI_KIT : (enum sp1_dui_page)(SP1_DUI_DRUM1 + n);
@@ -494,13 +653,24 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 	if (fnc && (ffwd_press || rwd_press)) {
 		const int dir = ffwd_press ? 1 : -1;
 		if (on_kit) {
-			sp1_dui_load_kit(kit + dir);
+			sp1_dui_load_kit(pt.kit + dir);
 			uint8_t lv[4];
-			kit_glyph(kit, lv);
+			kit_glyph(pt.kit, lv);
 			flash(lv);
-			LOG("KIT %d: %s\n", kit + 1, sp1_drums_kit_name(kit));
+			LOG("KIT %d: %s\n", pt.kit + 1, sp1_drums_kit_name(pt.kit));
 		} else if (drum_page) {
 			model_step(dn, dir);
+		} else if (on_set) {
+			pt.bass_mode = (uint8_t)((pt.bass_mode + (dir > 0 ? 1 : SP1_BASS_MODES - 1)) %
+						 SP1_BASS_MODES);
+			static const char *const bn[SP1_BASS_MODES] = {
+				"off", "on the Y clock (Y picks the note)", "only in the rests" };
+			const uint8_t lv[4] = { pt.bass_mode == 1 ? SP1_ENGINE_LED_FULL : 0u,
+						pt.bass_mode == 2 ? SP1_ENGINE_LED_FULL : 0u,
+						pt.bass_mode == 2 ? SP1_ENGINE_LED_FULL : 0u,
+						pt.bass_mode == 1 ? SP1_ENGINE_LED_FULL : 0u };
+			flash(lv);
+			LOG("BASS %s\n", bn[pt.bass_mode]);
 		}
 	}
 	if (ffwd_press) {
@@ -516,11 +686,11 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 
 	/* ---- SETTINGS: the rest style ---- */
 	if (on_set && !fnc && (ffwd_press || rwd_press)) {
-		rest_choke = rwd_press ? 1u : 0u;
-		const uint8_t lv[4] = { SP1_ENGINE_LED_FULL, rest_choke ? SP1_ENGINE_LED_FULL : 0u,
-					rest_choke ? SP1_ENGINE_LED_FULL : 0u, SP1_ENGINE_LED_FULL };
+		pt.rest_choke = rwd_press ? 1u : 0u;
+		const uint8_t lv[4] = { SP1_ENGINE_LED_FULL, pt.rest_choke ? SP1_ENGINE_LED_FULL : 0u,
+					pt.rest_choke ? SP1_ENGINE_LED_FULL : 0u, SP1_ENGINE_LED_FULL };
 		flash(lv);
-		LOG("RESTS %s\n", rest_choke ? "choke" : "ring out");
+		LOG("RESTS %s\n", pt.rest_choke ? "choke" : "ring out");
 	}
 
 	/* ---- playing ---- */
@@ -533,7 +703,8 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 			tape = rwd_down && !rwd_eaten && !fnc;
 			if (ffwd_press && !fnc) {
 				rotate_seq++;
-				LOG("ROTATE the kit, on the next beat\n");
+				LOG("ROTATE the kit, on the next %s\n",
+				    cfg.rotate_q == 0 ? "step" : (cfg.rotate_q == 2 ? "bar" : "beat"));
 			}
 		} else if (lane) {
 			if (rwd_down && !rwd_eaten && !fnc) {
@@ -562,34 +733,40 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 				LOG("AUDITION drum %d\n", dn + 1);
 			} else {
 				step_seq++;
-				LOG("STEP Marbles one tick\n");
+				LOG("STEP one 16th\n");
 			}
 		}
 		burst = ffwd_down && !ffwd_eaten && !fnc;
 	}
 
 	/* ---- tape slow: sink while held, ease back after ---- */
+	const float floor_ = cfg.tape_floor;
+	const float fall_ms = 1000.0f * cfg.tape_fall;
+	const float release_ms = 1000.0f * cfg.tape_release;
 	static bool tape_was;
 	if (tape != tape_was) {
 		tape_was = tape;
 		if (tape) {
-			LOG("TAPE slow: sinking to x%d.%02d\n", (int)TAPE_FLOOR,
-			    (int)(TAPE_FLOOR * 100.0f) % 100);
+			LOG("TAPE slow: sinking to x%d.%02d\n", (int)floor_, (int)(floor_ * 100.0f) % 100);
 		} else {
 			LOG("TAPE released at x%d.%02d: back over %d ms\n", (int)speed,
-			    (int)(speed * 100.0f) % 100, (int)TAPE_RELEASE_MS);
+			    (int)(speed * 100.0f) % 100, (int)release_ms);
 		}
 	}
 	if (tape) {
-		speed += (TAPE_FLOOR - speed) * (1.0f - expf(-(float)dt / TAPE_FALL_MS));
+		speed += (floor_ - speed) * (1.0f - expf(-(float)dt / (fall_ms > 1.0f ? fall_ms : 1.0f)));
 	} else if (speed < 1.0f) {
-		speed += (1.0f - TAPE_FLOOR) * (float)dt / TAPE_RELEASE_MS;
+		if (release_ms <= 0.0f) {
+			speed = 1.0f;                        /* tape_release = 0: at once */
+		} else {
+			speed += (1.0f - floor_) * (float)dt / release_ms;
+		}
 		if (speed > 1.0f) {
 			speed = 1.0f;
 		}
 	}
-	if (speed < TAPE_FLOOR) {
-		speed = TAPE_FLOOR;
+	if (speed < floor_) {
+		speed = floor_;
 	}
 	return act;
 }
@@ -625,22 +802,71 @@ void sp1_dui_ctl(struct sp1_drums_ctl *o)
 	const float semis = (float)(int)(semis_f + (semis_f >= 0.0f ? 0.5f : -0.5f));
 	const float d_tone = (detent(kb[1], DETENT_BIPOLAR) - 0.5f) * 0.8f;
 	const float d_decay = (detent(kb[2], DETENT_BIPOLAR) - 0.5f) * 0.8f;
-	const float d_mod = (detent(kb[3], DETENT_BIPOLAR) - 0.5f) * 0.8f;
+	const float fill = detent(kb[3], DETENT_BIPOLAR) - 0.5f;          /* +-0.5 density */
 	for (int v = 0; v < 4; v++) {
 		const float *b = stored[L_DRUM(v)];
 		const float *sh = stored[L_DRUM_SH(v)];
-		o->eng[v] = eng[v];
-		o->model[v] = model[v];
+		o->eng[v] = pt.eng[v];
+		o->model[v] = pt.model[v];
 		o->note[v] = b[0] * 120.0f + semis;
 		o->tone[v] = clamp01(b[1] + d_tone);
 		o->decay[v] = clamp01(b[2] + d_decay);
-		o->mod[v] = clamp01(b[3] + d_mod);
+		o->mod[v] = clamp01(b[3]);
 		o->excite[v] = clamp01(sh[3]);
-		o->level[v] = def_gain[v] * 2.0f * clamp01(sh[1]);
+		o->level[v] = pt.gain[v] * 2.0f * clamp01(sh[1]);
+		o->density[v] = clamp01(sh[0]);
+		o->len[v] = kLen[zone(sh[2], 5)];
+		o->pat[v] = pt.pat[v];
+		o->t_dest[v] = pt.t_dest[v];
+		o->x_dest[v] = pt.x_dest[v];
 	}
-	o->melodic = melodic;
-	o->mute = mute;
-	o->fx_on = fx_on;
+	o->fill = fill;
+	o->morph = clamp01(stored[L_SET][1]);
+	o->swing = clamp01(stored[L_SET][0]);
+	o->jitter = clamp01(mrb.jitter);
+	o->deja = clamp01(mrb.deja);
+	o->rotate_q = (uint8_t)cfg.rotate_q;
+	/* the cables' depth and the volts each output spans now ([J], INTELLIGENT per cable) */
+	static const uint8_t kYDiv[12] = { 64, 48, 32, 24, 16, 12, 8, 6, 4, 3, 2, 1 };
+	o->y_ticks = kYDiv[(mrb.y_div >= 0 && mrb.y_div < 12) ? mrb.y_div : 6];
+	for (int k = 0; k < 4; k++) {
+		o->depth[k] = mrb.depth[k] < -1.0f ? -1.0f : (mrb.depth[k] > 1.0f ? 1.0f : mrb.depth[k]);
+		const int r = k < 3 ? mrb.x_range : mrb.y_range;
+		float lo = -5.0f, hi = 5.0f;
+		if (r == 0) {                                     /* 0..2 V   */
+			lo = 0.0f; hi = 2.0f;
+		} else if (r == 1) {                              /* 0..5 V   */
+			lo = 0.0f; hi = 5.0f;
+		} else if (r == 3) {                              /* INTELLIGENT: per cable */
+			const uint8_t d = sp1_dui_range_dest(k);
+			lo = d == 1u || d == 0u ? -5.0f : 0.0f;
+			hi = d == 5u ? 2.0f : 5.0f;
+		}
+		o->lo[k] = lo;
+		o->hi[k] = hi;
+	}
+	/* the bass */
+	const float *bs = stored[L_SET_SH];
+	o->bass_mode = pt.bass_mode;
+	o->bass_octaves = (uint8_t)cfg.bass_octaves;
+	o->bass_root = cfg.bass_root;
+	o->bass_level = powf(10.0f, cfg.bass_level_db / 20.0f) * 2.5f;
+	o->bass_p[0] = clamp01(bs[1]);                       /* shape   */
+	o->bass_p[1] = clamp01(bs[2]);                       /* cutoff  */
+	o->bass_p[2] = cfg.bass_res;
+	o->bass_p[3] = cfg.bass_env;
+	o->bass_p[4] = clamp01(bs[3]);                       /* decay   */
+	o->bass_p[5] = cfg.bass_glide;
+	o->bass_p[6] = cfg.bass_sub;
+	o->bass_p[7] = zone_value(zone(bs[0], 5), 5);        /* octave: five steps */
+	o->n_deg = (uint8_t)(mrb.n_deg > 12 ? 12 : (mrb.n_deg < 0 ? 0 : mrb.n_deg));
+	for (int i = 0; i < o->n_deg; i++) {
+		o->degrees[i] = mrb.degrees[i];
+	}
+	o->period = mrb.period > 0.0f ? mrb.period : 12.0f;
+	o->melodic = pt.melodic;
+	o->mute = pt.mute;
+	o->fx_on = pt.fx_on;
 	o->fx[0] = detent(stored[L_KIT_SH][0], DETENT_BIPOLAR);
 	o->fx[1] = clamp01(stored[L_KIT_SH][1]);
 	o->fx[2] = clamp01(stored[L_KIT_SH][2]);
@@ -651,7 +877,7 @@ void sp1_dui_ctl(struct sp1_drums_ctl *o)
 	o->rest_write = rest_write;
 	o->rest_erase = rest_erase;
 	o->rest_clear = rest_clear;
-	o->rest_choke = rest_choke;
+	o->rest_choke = pt.rest_choke;
 	o->rest_clear_seq = rest_clear_seq;
 	o->rotate_seq = rotate_seq;
 	o->step_seq = step_seq;
@@ -683,7 +909,7 @@ void sp1_dui_page_leds(uint8_t out[4]) { leds_of(layer_of(page, false), out); }
 
 enum sp1_dui_page sp1_dui_page(void) { return page; }
 bool sp1_dui_shift(void) { return (active & 1) && active != L_SET; }
-int  sp1_dui_kit(void) { return kit; }
+int  sp1_dui_kit(void) { return pt.kit; }
 
 const char *sp1_dui_page_name(enum sp1_dui_page p)
 {

@@ -201,6 +201,11 @@ void sp1_mui_params(struct sp1_marbles_params *out);
 void sp1_mui_routing(struct sp1_mui_routing *out);
 /* The master clock's tempo (RATE and [B]), for the FFWD burst. */
 float sp1_mui_bpm(void);
+#if defined(CONFIG_SP1_DRUMS)
+/* The drum firmware: X SHIFT F1-F3 as X1-X3's cable depth, -1..+1 (10 % centre detent = 0).
+ * Y's is t SHIFT F1 (the GTLT value, sp1_mui_routing). */
+float sp1_mui_x_depth(int i);
+#endif
 /* Track row, see above. */
 void sp1_mui_leds(uint8_t out[4]);
 /* The PAGE you are standing on (t, X or SETTINGS), ignoring SHIFT -- see

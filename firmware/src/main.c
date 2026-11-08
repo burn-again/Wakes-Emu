@@ -898,6 +898,38 @@ static void drums_watch(bool running)
 	}
 }
 
+/* Every tick: Marbles' side of the drum controls (cable depths, jitter, DEJA VU, the Y
+ * divider, [J], the scale for the bass) into the drum pages, then their controls into the
+ * synth's parameters; and Marbles' INTELLIGENT range per output from what it is cabled to.
+ * The scale: Marbles' selected one, loaded into the main-thread quantizer PLAITS used (PLAITS
+ * has no scale of its own in the drum firmware). */
+static int drums_scale_loaded = -2;
+static void drums_publish(struct sp1_synth_params *sp, struct sp1_marbles_params *mp,
+			  const struct sp1_mui_routing *rt)
+{
+	static struct sp1_dui_marbles m;
+	for (int i = 0; i < 3; i++) {
+		m.depth[i] = sp1_mui_x_depth(i);
+	}
+	m.depth[3] = rt->gtlt;                  /* t SHIFT F1 */
+	m.jitter = mp->t_jitter;
+	m.deja = mp->t_deja_vu;
+	m.y_div = mp->y_divider;
+	m.x_range = mp->x_range;
+	m.y_range = mp->y_range;
+	if (drums_scale_loaded != sp1_mui_scale()) {
+		drums_scale_loaded = sp1_mui_scale();
+		sp1_marbles_plaits_scale(drums_scale_loaded);
+		m.n_deg = sp1_marbles_plaits_degrees(m.degrees, 12);
+		m.period = sp1_marbles_plaits_period();
+	}
+	sp1_dui_marbles(&m);
+	sp1_dui_ctl(&sp->drums);
+	for (int k = 0; k < 4; k++) {
+		mp->dest[k] = sp1_dui_range_dest(k);
+	}
+}
+
 static uint16_t button_mask(bool (*f)(enum sp1_button))
 {
 	uint16_t m = 0u;
@@ -933,6 +965,22 @@ static void marbles_buttons(bool fnc, uint32_t dt)
 	uint8_t lv[4];
 
 	if (fnc) {
+#if defined(CONFIG_SP1_DRUMS)
+		/* The drum firmware's cables (sp1_drums_ui): t page T1-T4 = t1, t2, t3, the Y clock;
+		 * X page T1-T4 = X1, X2, X3, Y. On RELEASE, because a hold is Unpatch. */
+		for (int t = 0; t < 4; t++) {
+			if (sp1_button_released((enum sp1_button)(SP1_BTN_T1 + t)) &&
+			    !sp1_rg_eats(&unpatch_eat, t)) {
+				const int out = (sp1_mui_page() == SP1_MUI_PAGE_X ? 4 : 0) + t;
+				sp1_dui_cable_step(out);
+				sp1_dui_cable_glyph(out, lv);
+				sp1_display_engine(lv);
+				printk("CABLE %s -> %s\n", sp1_dui_output_name(out),
+				       sp1_dui_cable_name(out));
+			}
+		}
+		if (0) {
+#endif
 		if (sp1_mui_page() == SP1_MUI_PAGE_T) {
 			/* t SHIFT: T1-T3 = t1-t3 destination (M4a: these were TRIG on/off
 			 * toggles; they cycle the same ring the X side does, with TRIG as
@@ -950,22 +998,6 @@ static void marbles_buttons(bool fnc, uint32_t dt)
 				}
 			}
 			marbles_y_dest_button();
-#if defined(CONFIG_SP1_DRUMS)
-			/* [B], the t range, moved here from the plain rocker: in the drum firmware
-			 * RWD / FFWD are the rests, the step and the burst. */
-			const int bstep = sp1_button_pressed(SP1_BTN_FFWD) ? 1
-					: sp1_button_pressed(SP1_BTN_RWD) ? -1 : 0;
-			if (bstep != 0 && sp1_mui_t_range_step(bstep)) {
-				static const uint8_t F = SP1_ENGINE_LED_FULL;
-				const int r = sp1_mui_t_range();
-				lv[0] = r == 0 ? F : 0u;
-				lv[1] = lv[2] = r == 1 ? F : 0u;
-				lv[3] = r == 2 ? F : 0u;
-				sp1_display_engine(lv);
-				printk("RANGE t %s: %d BPM\n", t_range_name[sp1_mui_t_range()],
-				       (int)sp1_mui_bpm());
-			}
-#endif
 		} else {
 			/* X SHIFT: T1-T3 = X1-X3 destination; T4 = Y destination (M4e --
 			 * [J] moved to the SETTINGS page and now covers X and Y together);
@@ -1000,6 +1032,34 @@ static void marbles_buttons(bool fnc, uint32_t dt)
 				}
 			}
 		}
+#if defined(CONFIG_SP1_DRUMS)
+		}
+		/* "••" + FFWD / RWD: the t range on the t page (moved off the plain rocker, which is
+		 * the rests'), the scale on the X page -- as above, for the drum firmware. */
+		if (sp1_mui_page() == SP1_MUI_PAGE_T) {
+			const int bstep = sp1_button_pressed(SP1_BTN_FFWD) ? 1
+					: sp1_button_pressed(SP1_BTN_RWD) ? -1 : 0;
+			if (bstep != 0 && sp1_mui_t_range_step(bstep)) {
+				static const uint8_t F = SP1_ENGINE_LED_FULL;
+				const int r = sp1_mui_t_range();
+				lv[0] = r == 0 ? F : 0u;
+				lv[1] = lv[2] = r == 1 ? F : 0u;
+				lv[3] = r == 2 ? F : 0u;
+				sp1_display_engine(lv);
+				printk("RANGE t %s: %d BPM\n", t_range_name[sp1_mui_t_range()],
+				       (int)sp1_mui_bpm());
+			}
+		} else {
+			const int sstep = sp1_button_pressed(SP1_BTN_FFWD) ? 1
+					: sp1_button_pressed(SP1_BTN_RWD) ? -1 : 0;
+			if (sstep != 0 && sp1_mui_scale_step(sstep)) {
+				sp1_mui_scale_pattern(lv);
+				sp1_display_engine(lv);
+				printk("SCALE %d: %s\n", sp1_mui_scale() + 1,
+				       sp1_marbles_scale_name(sp1_mui_scale()));
+			}
+		}
+#endif
 		return;
 	}
 
@@ -1268,6 +1328,9 @@ static void prst_load(const struct sp1_prst *p)
 {
 	sp1_pui_put(&p->plaits);
 	sp1_mui_put(&p->marbles);
+#if defined(CONFIG_SP1_DRUMS)
+	sp1_dui_put(&p->drums);
+#endif
 	g_out_mode = (uint8_t)p->out_mode;
 	sp1_synth_set_output((enum sp1_synth_output)g_out_mode);
 	g_burst_div = (uint8_t)p->burst_div;
@@ -1304,6 +1367,9 @@ static void prst_gather(struct sp1_prst *p)
 {
 	sp1_pui_get(&p->plaits);
 	sp1_mui_get(&p->marbles);
+#if defined(CONFIG_SP1_DRUMS)
+	sp1_dui_get(&p->drums);
+#endif
 	p->out_mode = g_out_mode;
 	p->burst_div = g_burst_div;
 	p->drive = sp1_synth_drive();
@@ -1620,10 +1686,30 @@ int main(void)
 			}
 			ARG_UNUSED(ac);
 			ARG_UNUSED(mc);
+#if defined(CONFIG_SP1_DRUMS) && defined(CONFIG_SP1_STORAGE)
+			const struct sp1_drums_cfg *dc;
+			if (sp1_store_drums_cfg(&dc)) {
+				sp1_dui_set_cfg(dc);
+			}
+#endif
 		}
 		if (g_prst_on) {
 			prst_apply(sp1_store_prst_slot(g_prst_slot));
 		}
+#if defined(CONFIG_SP1_DRUMS)
+		{
+			struct sp1_drums_patch dp;
+			sp1_dui_get(&dp);
+			int cables = 0;
+			for (int k = 0; k < 4; k++) {
+				cables += (dp.t_dest[k] != 0u) + (dp.x_dest[k] != 0u);
+			}
+			static const char *const bm[3] = { "off", "y", "rests" };
+			printk("DRUMS kit %d: %s, bass %s, %d cable%s, rests %s\n", dp.kit + 1,
+			       sp1_drums_kit_name(dp.kit), bm[dp.bass_mode < 3u ? dp.bass_mode : 0u],
+			       cables, cables == 1 ? "" : "s", dp.rest_choke ? "choke" : "ring out");
+		}
+#endif
 #endif
 #endif
 
@@ -1725,6 +1811,7 @@ int main(void)
 			sp1_pui_enter(raw);
 #if defined(CONFIG_SP1_DRUMS)
 			sp1_dui_enter(raw);
+			drums_scale_loaded = -2;
 #endif
 			if (g_module == SP1_MODULE_MARBLES) {
 				sp1_mui_enter(raw, true);
@@ -2272,6 +2359,17 @@ int main(void)
 							/* ---- the animation has ended: commit ---- */
 							int n = 0;
 							const char *what = "";
+#if defined(CONFIG_SP1_DRUMS)
+							if (marbles) {
+								/* the drum firmware's cable on that button */
+								const int out = (sp1_mui_page() == SP1_MUI_PAGE_X
+										 ? 4 : 0) + ubtn;
+								const char *was = sp1_dui_cable_name(out);
+								n = sp1_dui_cable_unpatch(out);
+								printk("UNPATCH %s: %s\n", sp1_dui_output_name(out),
+								       n ? was : "nothing was patched");
+							} else if (0) {
+#endif
 							if (marbles) {
 								const bool tpage = sp1_mui_page() ==
 									SP1_MUI_PAGE_T;
@@ -2317,6 +2415,9 @@ int main(void)
 								printk("UNPATCH %s: %d route%s cleared\n",
 								       what, n, n == 1 ? "" : "s");
 							}
+#if defined(CONFIG_SP1_DRUMS)
+							}
+#endif
 							sp1_rg_arm(&unpatch_eat, ubtn);
 							static const uint8_t dk[4] = { 0u, 0u, 0u, 0u };
 							sp1_display_flash(dk, 0u,
@@ -2486,13 +2587,12 @@ int main(void)
 					sp.mrb_dest[k] = rt.dest[k];
 				}
 				sp.mrb_gtlt = rt.gtlt;
-#if defined(CONFIG_SP1_DRUMS)
-				sp1_dui_ctl(&sp.drums);
-#endif
-				sp1_synth_set_params(&sp);
-
 				struct sp1_marbles_params mp;
 				sp1_mui_params(&mp);
+#if defined(CONFIG_SP1_DRUMS)
+				drums_publish(&sp, &mp, &rt);
+#endif
+				sp1_synth_set_params(&sp);
 #if defined(CONFIG_SP1_DRUMS)
 				/* Tape slow: Marbles' clock bends with the machine (RATE is semitones). */
 				mp.rate += 12.0f * log2f(sp1_dui_speed());

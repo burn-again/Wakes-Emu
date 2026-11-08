@@ -60,6 +60,9 @@
 
 #include "sp1_plaits_ui.h"
 #include "sp1_marbles_ui.h"
+#if defined(CONFIG_SP1_DRUMS)
+#include "sp1_drums_patch.h"     /* the drum firmware's [drums] section (sp1_store.c) */
+#endif
 
 /* main.c's part of the PLAITS patch, at their ROTC defaults (docs/DEFAULTS.md). main.c's rip
  * uses these too, so there is one set. */
@@ -73,6 +76,11 @@ struct sp1_prst {
 	int burst_div;                /* 0..7: the FFWD burst at 1/(1 << burst_div)    */
 	int drive;                    /* 0..SP1_DRIVE_STEPS-1                          */
 	struct sp1_mui_patch marbles;
+#if defined(CONFIG_SP1_DRUMS)
+	/* Not part of this file's format: sp1_store.c appends it as a [drums] section after the
+	 * text sp1_prst_write() makes, and reads it back from the same text (sp1_drums_patch.h). */
+	struct sp1_drums_patch drums;
+#endif
 };
 
 /* The ROTC default patch -- what ROTC on both modules gives -- with PLAITS' BASE at the
@@ -82,7 +90,11 @@ void sp1_prst_rip(struct sp1_prst *p, int slot);
 
 /* The patch as text, into buf (NUL-terminated). Returns its length, or -1 if `size` is too
  * small. SP1_PRST_TEXT_MAX always fits. */
+#if defined(CONFIG_SP1_DRUMS)
+#define SP1_PRST_TEXT_MAX 4096           /* + the [drums] section */
+#else
 #define SP1_PRST_TEXT_MAX 2048
+#endif
 int sp1_prst_write(const struct sp1_prst *p, char *buf, size_t size);
 
 /* Text (need not be NUL-terminated) back into a patch, every field checked. ALWAYS leaves
