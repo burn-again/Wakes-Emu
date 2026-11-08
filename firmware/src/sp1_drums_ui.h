@@ -8,27 +8,30 @@
  *   DRUM n     Tn from KIT or another DRUM page; Tn again returns to KIT
  *   SETTINGS   "••" double tap; one "••" tap returns to the page you came from
  *   MARBLES    "••" triple tap (main swaps the module; triple tap there comes back to KIT)
- * Holding "••" shows the page's SHIFT layer (SETTINGS shows KIT's: the FX).
+ * Holding "••" shows the page's SHIFT layer.
  *
  *   page             F1                F2             F3            F4
- *   KIT              kit pitch +-12 st kit tone       kit decay     kit mod        (all centred)
+ *   KIT              kit pitch +-12 st kit tone       kit decay     fill           (all centred)
  *   KIT + SHIFT      DJ filter         fold           Chebyshev     FM             (FX amounts)
  *   DRUM n           pitch             tone           decay         mod
- *   DRUM n + SHIFT   density *         level          length *      excite
- *   SETTINGS         swing *           morph *        FM carrier    bus drive
- *   (* the step sequencer's, step 3: stored and saved, not yet heard)
+ *   DRUM n + SHIFT   density           level          length        excite
+ *   SETTINGS         swing             morph          FM carrier    bus drive
+ *   SETTINGS + SHIFT bass octave       bass shape     bass cutoff   bass decay
  *
  * ---- buttons ----
  *   T1-T4            KIT / DRUM: open DRUM n (same T = back to KIT). SETTINGS: mute drum n
- *   "••" + T1-T4     FX 1-4 on / off (filter, fold, Chebyshev, FM)
- *   "••" + FFWD/RWD  KIT: next / previous built-in kit. DRUM n: next / previous model
+ *   "••" + T1-T4     KIT / DRUM: FX 1-4 on / off (filter, fold, Chebyshev, FM).
+ *                    SETTINGS: drum n's maps from the next kit
+ *   "••" + FFWD/RWD  KIT: next / previous built-in kit. DRUM n: next / previous model.
+ *                    SETTINGS: the bass mode (off / on the Y clock / only in the rests)
+ *   MARBLES "••" + T1-T4 (main.c): the cables, sp1_dui_cable_step below
  *
  * ---- the rocker (FFWD up, RWD down); MARBLES acts on every drum ----
  *   page         playing: RWD          playing: FFWD                  stopped: RWD     stopped: FFWD
- *   KIT          held: tape slow       tap: rotate the kit            step Marbles     held: burst
+ *   KIT          held: tape slow       tap: rotate the kit            step one 16th    held: burst
  *   DRUM n       held: rest drum n     held: release; tap: clear      audition drum n  held: burst drum n
  *   SETTINGS     rests choke           rests ring out                 (the same)
- *   MARBLES      held: rest all        held: release all; tap: clear  step Marbles     held: burst
+ *   MARBLES      held: rest all        held: release all; tap: clear  step one 16th    held: burst
  */
 #ifndef SP1_DRUMS_UI_H
 #define SP1_DRUMS_UI_H
@@ -121,8 +124,9 @@ void sp1_dui_set_cfg(const struct sp1_drums_cfg *c);   /* each ON, before the pr
 void sp1_dui_get(struct sp1_drums_patch *p);
 void sp1_dui_put(const struct sp1_drums_patch *p);     /* no [drums]: nothing changes   */
 
-/* "••" + PLAY held 3 s on the drum pages: the current kit as stored, FX at zero (on),
- * SETTINGS at defaults, nothing muted, every rest cleared, rests choke. */
+/* "••" + PLAY held 3 s on the drum pages: the current kit as stored (its own maps), FX at zero
+ * (on), SETTINGS and the bass at defaults, nothing muted, every rest and cable cleared, the
+ * rest style and bass mode from drums.cnfg. */
 void sp1_dui_rip(void);
 void sp1_dui_load_kit(int kit);
 
