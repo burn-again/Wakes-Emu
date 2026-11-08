@@ -26,6 +26,9 @@
 #define SP1_SYNTH_H
 
 #include <stdint.h>
+#if defined(CONFIG_SP1_DRUMS)
+#include "sp1_drums_ctl.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -102,6 +105,10 @@ struct sp1_synth_params {
 	 * ⚠️ 0 while no scale is selected: unquantized FREQUENCY stays continuous, which is
 	 * what a fader with no grid should do. */
 	int     note_hold;
+#if defined(CONFIG_SP1_DRUMS)
+	/* The drum firmware's pages (sp1_drums_ui) -> the kit (sp1_drums). */
+	struct sp1_drums_ctl drums;
+#endif
 };
 
 /* Publish a complete parameter set. Main thread. The audio thread picks it up at its

@@ -92,6 +92,11 @@
 #include "sp1_plaits_ui.h"
 #include "sp1_marbles.h"
 #include "sp1_marbles_ui.h"
+#if defined(CONFIG_SP1_DRUMS)
+#include "sp1_drums_ui.h"        /* the drum pages, in place of the PLAITS page */
+#include "sp1_drums.h"
+#include <math.h>
+#endif
 #include "sp1_prst.h"            /* M6 (#50): the ROTC defaults main.c owns */
 #include "sp1_release_guard.h"
 #include "sp1_midi.h"
@@ -824,6 +829,87 @@ static void voct_took_over(uint8_t dest)
 	}
 }
 
+#if defined(CONFIG_SP1_DRUMS)
+/* ---- the drum firmware's module swaps ----
+ * The drum pages take T1-T4 for DRUM 1-4, so MARBLES is a "••" triple tap away (and T4 on
+ * MARBLES still comes back, as it always did); a triple tap on MARBLES returns to KIT. */
+static void drums_to_marbles(const uint16_t raw[4], bool fnc)
+{
+	g_module = SP1_MODULE_MARBLES;
+	sp1_mui_enter(raw, fnc);
+	uint8_t plv[4];
+	sp1_mui_page_pattern(plv);
+	sp1_display_engine(plv);
+	sp1_playrow_set_fg(SP1_FG_CLOCK);
+	printk("MODULE marbles (%s page)\n", sp1_mui_page() == SP1_MUI_PAGE_X ? "X" : "t");
+}
+
+static void drums_to_kit(const uint16_t raw[4], bool fnc)
+{
+	g_module = SP1_MODULE_PLAITS;
+	sp1_dui_resume(raw, fnc);
+	sp1_playrow_set_fg(SP1_FG_METER);
+	printk("MODULE drums (kit %d: %s)\n", sp1_dui_kit() + 1, sp1_drums_kit_name(sp1_dui_kit()));
+}
+
+/* Everything the drum pages asked for this tick: the glyph, the log. */
+static void drums_drain(void)
+{
+	uint8_t lv[4];
+	if (sp1_dui_flash(lv)) {
+		sp1_display_engine(lv);
+	}
+	const char *line;
+	while ((line = sp1_dui_log()) != NULL) {
+		printk("%s", line);
+	}
+}
+
+/* What the kit did with the rocker, as the audio thread reports it (sp1_drums_status): the
+ * rests whenever they change, a rotation when it lands, and hits while stopped (a step, an
+ * audition, a burst). For the log -- and so a test can check the effect, not the press. */
+static void drums_watch(bool running)
+{
+	static uint8_t n_was[4] = { 0u, 0u, 0u, 0u };
+	static uint8_t rot_was;
+	static uint32_t hits_was;
+	struct sp1_drums_status st;
+	sp1_drums_status(&st);
+	uint8_t n[4];
+	bool changed = false;
+	for (int i = 0; i < 4; i++) {
+		n[i] = (uint8_t)__builtin_popcount(st.rests[i]);
+		changed = changed || n[i] != n_was[i];
+		n_was[i] = n[i];
+	}
+	if (changed) {
+		printk("RESTS per bar: slot 1 %u, slot 2 %u, slot 3 %u, slot 4 %u (of 16)\n",
+		       n[0], n[1], n[2], n[3]);
+	}
+	if (st.rotation != rot_was) {
+		rot_was = st.rotation;
+		printk("ROTATED: slot 1 plays drum %u\n", (unsigned)((4u - st.rotation) & 3u) + 1u);
+	}
+	if (st.hits != hits_was) {
+		if (!running) {
+			printk("HIT drums 0x%x (%u)\n", st.last_hits, st.hits - hits_was);
+		}
+		hits_was = st.hits;
+	}
+}
+
+static uint16_t button_mask(bool (*f)(enum sp1_button))
+{
+	uint16_t m = 0u;
+	for (int b = 0; b < SP1_BTN_COUNT; b++) {
+		if (f((enum sp1_button)b)) {
+			m |= (uint16_t)(1u << b);
+		}
+	}
+	return m;
+}
+#endif
+
 /* MARBLES module buttons, except PLAY and T4 (module), handled in main. */
 /* "••" + T4 on either Marbles page: Y's destination (M4e -- it was SETTINGS T1). On
  * RELEASE, because T4 is also Unpatch-Y. */
@@ -864,6 +950,22 @@ static void marbles_buttons(bool fnc, uint32_t dt)
 				}
 			}
 			marbles_y_dest_button();
+#if defined(CONFIG_SP1_DRUMS)
+			/* [B], the t range, moved here from the plain rocker: in the drum firmware
+			 * RWD / FFWD are the rests, the step and the burst. */
+			const int bstep = sp1_button_pressed(SP1_BTN_FFWD) ? 1
+					: sp1_button_pressed(SP1_BTN_RWD) ? -1 : 0;
+			if (bstep != 0 && sp1_mui_t_range_step(bstep)) {
+				static const uint8_t F = SP1_ENGINE_LED_FULL;
+				const int r = sp1_mui_t_range();
+				lv[0] = r == 0 ? F : 0u;
+				lv[1] = lv[2] = r == 1 ? F : 0u;
+				lv[3] = r == 2 ? F : 0u;
+				sp1_display_engine(lv);
+				printk("RANGE t %s: %d BPM\n", t_range_name[sp1_mui_t_range()],
+				       (int)sp1_mui_bpm());
+			}
+#endif
 		} else {
 			/* X SHIFT: T1-T3 = X1-X3 destination; T4 = Y destination (M4e --
 			 * [J] moved to the SETTINGS page and now covers X and Y together);
@@ -907,9 +1009,14 @@ static void marbles_buttons(bool fnc, uint32_t dt)
 		ffwd_consumed = true;
 	}
 
-	/* [B] on RWD / FFWD: clock range, no wrap (Adara). Every Marbles page. */
+	/* [B] on RWD / FFWD: clock range, no wrap (Adara). Every Marbles page. (The drum
+	 * firmware moves it to "••" + RWD / FFWD on the t page: the rocker is the rests'.) */
+#if defined(CONFIG_SP1_DRUMS)
+	const int rstep = 0;
+#else
 	const int rstep = sp1_button_pressed(SP1_BTN_FFWD) ? 1
 			: sp1_button_pressed(SP1_BTN_RWD) ? -1 : 0;
+#endif
 	if (rstep != 0) {
 		if (sp1_mui_t_range_step(rstep)) {
 			static const uint8_t F = SP1_ENGINE_LED_FULL;
@@ -1416,6 +1523,9 @@ int main(void)
 #if defined(CONFIG_SP1_PLAITS)
 	sp1_pui_init();                /* page defaults: once per boot, kept across ON */
 	sp1_mui_init();
+#if defined(CONFIG_SP1_DRUMS)
+	sp1_dui_init();
+#endif
 #endif
 #if defined(CONFIG_SP1_STORAGE) && defined(CONFIG_SP1_PLAITS)
 	sp1_power_set_save_hook(storage_at_shutdown);     /* PRST (#50), the log (#52) */
@@ -1613,6 +1723,9 @@ int main(void)
 			}
 			faders_raw(raw);
 			sp1_pui_enter(raw);
+#if defined(CONFIG_SP1_DRUMS)
+			sp1_dui_enter(raw);
+#endif
 			if (g_module == SP1_MODULE_MARBLES) {
 				sp1_mui_enter(raw, true);
 			}
@@ -1802,7 +1915,11 @@ int main(void)
 				if (g_module == SP1_MODULE_MARBLES) {
 					(rip_show_page ? sp1_mui_page_leds : sp1_mui_leds)(lv);
 				} else {
+#if defined(CONFIG_SP1_DRUMS)
+					(rip_show_page ? sp1_dui_page_leds : sp1_dui_leds)(lv);
+#else
 					(rip_show_page ? sp1_pui_page_leds : sp1_pui_leds)(lv);
+#endif
 				}
 				sp1_display_meter(lv);
 			}
@@ -1869,6 +1986,29 @@ int main(void)
 				const bool running = sp1_marbles_running();
 
 				if (!marbles) {
+#if defined(CONFIG_SP1_DRUMS)
+					const uint32_t ev = sp1_dui_tick(dt, raw, valid, fnc, act);
+					if (ev & SP1_DUI_EV_LAYER) {
+						printk(sp1_dui_shift() ? "SHIFT held\n" : "SHIFT released\n");
+					}
+					if (ev & SP1_DUI_EV_PAGE) {
+						printk("PAGE %s\n", sp1_dui_page_name(sp1_dui_page()));
+					}
+					if (ev & SP1_DUI_EV_CAUGHT) {
+						for (int i = 0; i < SP1_NUM_FADERS; i++) {
+							if (ev & (0x10u << i)) {
+								printk("PICKUP F%d caught (%s%s)\n", i + 1,
+								       sp1_dui_page_name(sp1_dui_page()),
+								       sp1_dui_shift() ? " shift" : "");
+							}
+						}
+					}
+					if (ev & SP1_DUI_EV_TO_MARBLES) {
+						drums_to_marbles(raw, fnc);
+					}
+					drums_drain();
+				} else if (0) {
+#endif
 					const uint32_t ev = sp1_pui_tick(dt, raw, valid, fnc, act);
 					if (ev & SP1_PUI_EV_LAYER) {
 						if (sp1_pui_active() == SP1_PUI_SHIFT) {
@@ -1902,6 +2042,26 @@ int main(void)
 						printk("MARBLES %s\n",
 						       sp1_mui_layer_name(sp1_mui_active()));
 					}
+#if defined(CONFIG_SP1_DRUMS)
+					/* "••" triple tap on MARBLES: back to KIT. Marbles' own taps
+					 * latch its SETTINGS on the 2nd and leave it on the next, so a
+					 * leave this soon after the latch is the 3rd tap of three
+					 * (400 ms gap + a 300 ms tap). */
+					{
+						static uint32_t latched_ms = 0xFFFFFFFFu;
+						if (latched_ms != 0xFFFFFFFFu) {
+							latched_ms += dt;
+						}
+						if (ev & SP1_MUI_EV_PAGE) {
+							if (sp1_mui_settings()) {
+								latched_ms = 0u;
+							} else if (latched_ms <= 700u) {
+								latched_ms = 0xFFFFFFFFu;
+								drums_to_kit(raw, fnc);
+							}
+						}
+					}
+#endif
 					if (ev & SP1_MUI_EV_CAUGHT) {
 						for (int i = 0; i < SP1_NUM_FADERS; i++) {
 							if (ev & (0x10u << i)) {
@@ -2001,6 +2161,12 @@ int main(void)
 							       sp1_marbles_running()
 							       ? " (clock still running)" : "");
 						} else {
+#if defined(CONFIG_SP1_DRUMS)
+							sp1_dui_rip();
+							printk("RIP drums: kit %d as stored, FX at zero, "
+							       "settings default, unmuted, rests cleared\n",
+							       sp1_dui_kit() + 1);
+#endif
 							sp1_pui_rip();
 							/* ⚠️ The drive is a PLAITS parameter and only a
 							 * PLAITS rip clears it (Adara, M4e): Marbles
@@ -2089,9 +2255,15 @@ int main(void)
 				 * the MARBLES t and X pages (its SETTINGS T1-T4 are [F], [G] and
 				 * [J]). Elsewhere the hold does nothing at all, which is the honest
 				 * answer -- an animation followed by nothing would be a lie. */
+#if defined(CONFIG_SP1_DRUMS)
+				/* The drum pages' "••" + T1-T4 are the FX toggles: nothing to cut there. */
+				const bool unpatchable = fnc && !shutdown_active && marbles &&
+					!sp1_mui_settings();
+#else
 				const bool unpatchable = fnc && !shutdown_active &&
 					(marbles ? !sp1_mui_settings()
 						 : sp1_pui_page() != SP1_PUI_SETTINGS);
+#endif
 				const int ubtn = unpatchable ? unpatch_held_button() : -1;
 				if (ubtn >= 0 && ubtn == unpatch_btn) {
 					if (unpatch_ms < SP1_UNPATCH_HOLD_MS) {
@@ -2181,6 +2353,34 @@ int main(void)
 				 * MARBLES it is [J], and on PLAITS it is output select (#11) --
 				 * so the panel cannot be left by accident (Adara, M4b). Tap "••"
 				 * to leave. */
+#if defined(CONFIG_SP1_DRUMS)
+				/* ---- the drum firmware: T4 on MARBLES comes back to KIT; the drum
+				 * pages and the rocker on both modules are sp1_drums_ui's ---- */
+				if (marbles && !fnc && sp1_button_pressed(SP1_BTN_T4) &&
+				    !sp1_mui_settings()) {
+					drums_to_kit(raw, fnc);
+				} else if (marbles) {
+					marbles_buttons(fnc, dt);
+				}
+				{
+					struct sp1_dui_keys keys;
+					keys.fnc = fnc;
+					keys.running = running;
+					keys.marbles = marbles;
+					keys.pressed = button_mask(sp1_button_pressed);
+					keys.held = button_mask(sp1_button_held);
+					keys.released = button_mask(sp1_button_released);
+					if (shutdown_active || rip_ms > 0u || prst_showing) {
+						keys.pressed = keys.released = 0u;   /* the gesture owns them */
+					}
+					if (sp1_dui_keys(dt, &keys) & SP1_DUI_ACT_TRIG) {
+						sp1_synth_trigger();
+					}
+					drums_drain();
+					drums_watch(running);
+				}
+				if (0) {
+#endif
 				if (!fnc && sp1_button_pressed(SP1_BTN_T4) &&
 				    !(marbles && sp1_mui_settings()) &&
 				    !(!marbles && sp1_pui_page() == SP1_PUI_SETTINGS)) {
@@ -2205,6 +2405,9 @@ int main(void)
 				} else {
 					marbles_buttons(fnc, dt);
 				}
+#if defined(CONFIG_SP1_DRUMS)
+				}
+#endif
 				/* ⚠️ Disarm only once the button is UP: its release has then been
 				 * seen and eaten by the handlers above. M4e cleared the flag here
 				 * on EVERY tick, and since the commit happens with the button still
@@ -2232,9 +2435,15 @@ int main(void)
 				 * advance faster: a roll, not an arpeggio. Driving Marbles' clock at a
 				 * subdivision is a separate idea, parked for a community vote, and is
 				 * deliberately not built. */
+#if defined(CONFIG_SP1_DRUMS)
+				/* Stopped only, on any page but SETTINGS (sp1_drums_ui): playing, FFWD is
+				 * the rests' and the rotation's. */
+				const bool burst = sp1_dui_burst();
+#else
 				const bool ffwd = (g_module == SP1_MODULE_PLAITS) &&
 						  sp1_button_held(SP1_BTN_FFWD) && !ffwd_consumed;
 				const bool burst = ffwd;
+#endif
 				if (!sp1_button_held(SP1_BTN_FFWD)) {
 					ffwd_consumed = false;
 				}
@@ -2277,10 +2486,17 @@ int main(void)
 					sp.mrb_dest[k] = rt.dest[k];
 				}
 				sp.mrb_gtlt = rt.gtlt;
+#if defined(CONFIG_SP1_DRUMS)
+				sp1_dui_ctl(&sp.drums);
+#endif
 				sp1_synth_set_params(&sp);
 
 				struct sp1_marbles_params mp;
 				sp1_mui_params(&mp);
+#if defined(CONFIG_SP1_DRUMS)
+				/* Tape slow: Marbles' clock bends with the machine (RATE is semitones). */
+				mp.rate += 12.0f * log2f(sp1_dui_speed());
+#endif
 				/* INTELLIGENT (M4c) needs both modules: which parameters of
 				 * the CURRENT engine are bipolar. Re-read every tick, so the
 				 * range follows an engine change while the sequence plays. */

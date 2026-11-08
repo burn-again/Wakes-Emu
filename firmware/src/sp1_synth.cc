@@ -8,7 +8,7 @@
 
 #include "sp1_synth.h"
 #if defined(CONFIG_SP1_DRUMS)
-#include "sp1_drums.h"             // drum firmware stage 1: the kit replaces the voice's render
+#include "sp1_drums.h"             // drum firmware: the kit replaces the voice's render
 #endif
 #include "sp1_marbles.h"
 #include "sp1_marbles_ui.h"
@@ -478,6 +478,9 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
   const uint32_t li = live;
   std::atomic_signal_fence(std::memory_order_seq_cst);
   const sp1_synth_params c = buf[li];
+#if defined(CONFIG_SP1_DRUMS)
+  sp1_drums_begin(&c);                 // the drum pages' controls for this DMA block
+#endif
   patch.note = c.note;
   patch.harmonics = c.harmonics;
   patch.timbre = c.timbre;
@@ -515,6 +518,9 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     pulse_started = true;
   }
 
+#if defined(CONFIG_SP1_DRUMS)
+  bool drums_ext_clock = false;        // MIDI owns Marbles' clock this block (no steps)
+#endif
 #if defined(CONFIG_SP1_MIDI)
   // ---- MIDI (M5a): this audio block's messages, each placed at its Plaits block, and the
   // CC offsets, smoothed once per audio block (sp1_midi.h). Taken BEFORE Marbles renders:
@@ -530,8 +536,15 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     sp1_midi_clock clk;
     sp1_midi_audio_clock(&clk);
     sp1_marbles_clock(clk.external ? clk.beats : nullptr, clk.transport);
+#if defined(CONFIG_SP1_DRUMS)
+    drums_ext_clock = clk.external;
+#endif
   }
   prof.pre_midi = Now() - prof_mi0;
+#endif
+#if defined(CONFIG_SP1_DRUMS)
+  // Step-through (KIT / MARBLES, RWD while stopped): one beat of Marbles' clock (sp1_drums.h).
+  sp1_drums_clock(frames / plaits::kBlockSize, drums_ext_clock);
 #endif
 
   // Marbles, one sample per Plaits block (the 4 kHz rule, sp1_marbles.h). Stopped,
@@ -615,9 +628,6 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
 #endif
 
   // Everything above runs once per audio block (#32: `pre`, Marbles excluded).
-#if defined(CONFIG_SP1_DRUMS)
-  sp1_drums_begin(&c);                 // kit, offsets and FX amounts for this DMA block
-#endif
   prof.pre = Now() - prof_t0 - prof.mrb;
   prof.miss_pre = Miss() - miss_t0 - prof.miss_mrb;
 
@@ -801,9 +811,15 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
     const uint32_t prof_e0 = Now();
     const uint32_t miss_e0 = Miss();
 #if defined(CONFIG_SP1_DRUMS)
-    (void)user_edge;
-    sp1_drums_render(mrb ? drum_rise : 0u, mrb ? &mrb_volts[4u * (j - 1u)] : nullptr,
-                     user_edge, v, plaits::kBlockSize);
+    {
+      sp1_drums_frame df;
+      df.rise = mrb ? drum_rise : 0u;
+      df.volts = mrb ? &mrb_volts[4u * (j - 1u)] : nullptr;
+      df.ramp = mrb ? mrb_ramp[j - 1u] : 0.0f;
+      df.running = mrb;
+      df.audition = user_edge;
+      sp1_drums_render(&df, v, plaits::kBlockSize);
+    }
 #else
     (void)user_edge; (void)drum_rise;
     if (fading) {

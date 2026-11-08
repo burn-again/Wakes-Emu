@@ -18,12 +18,13 @@ enum { TFX_FILTER, TFX_FOLD, TFX_CHEBY, TFX_FM, TFX_CRUSH, TFX_COUNT };
 typedef struct {
   float amt[TFX_COUNT], prev[TFX_COUNT];
   float ic1[2], ic2[2];          /* filter state, per channel */
-  uint32_t fm_phase; float fm_env;
+  uint32_t fm_phase; float fm_env, fm_hz;   /* fm_hz: the carrier, G3 = 196 by default */
   float crush_hold[2], crush_ctr;
 } tfx_state;
 
 void tfx_init(tfx_state *s);
 void tfx_set(tfx_state *s, unsigned fx, float amount);
+void tfx_set_carrier(tfx_state *s, float hz);   /* the FM carrier, 20..2000 Hz */
 void tfx_process(tfx_state *s, float *l, float *r, unsigned n);   /* in place; r may be NULL (mono) */
 unsigned tfx_state_size(void);
 

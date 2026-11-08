@@ -18,6 +18,7 @@ static inline float sin_p(uint32_t p) {
 void tfx_init(tfx_state *s) {
   memset(s, 0, sizeof *s);
   s->amt[TFX_FILTER] = s->prev[TFX_FILTER] = 0.5f;
+  s->fm_hz = 196.0f;
   if (!sine_ready) {
     for (int i = 0; i <= 256; ++i) sine_tab[i] = sinf(6.2831853f * (float)i / 256.0f);
     sine_ready = 1;
@@ -25,6 +26,7 @@ void tfx_init(tfx_state *s) {
 }
 
 void tfx_set(tfx_state *s, unsigned fx, float a) { if (fx < TFX_COUNT) s->amt[fx] = clampf(a, 0.0f, 1.0f); }
+void tfx_set_carrier(tfx_state *s, float hz) { s->fm_hz = clampf(hz, 20.0f, 2000.0f); }
 unsigned tfx_state_size(void) { return (unsigned)sizeof(tfx_state); }
 
 /* DJ filter coefficients for an amount: TPT state-variable filter (Zavalishin). */
@@ -52,7 +54,7 @@ void tfx_process(tfx_state *s, float *l, float *r, unsigned n) {
   if (s->amt[TFX_FM] > 0.0f || s->prev[TFX_FM] > 0.0f) {
     float a = s->prev[TFX_FM], da = (s->amt[TFX_FM] - a) * inv;
     uint32_t ph = s->fm_phase; float env = s->fm_env;
-    const float fc = 196.0f / SR * 4294967296.0f;            /* carrier G3, in phase units */
+    const float fc = s->fm_hz / SR * 4294967296.0f;          /* the carrier, in phase units */
     for (unsigned i = 0; i < n; ++i, a += da) {
       const float x = r ? 0.5f * (l[i] + r[i]) : l[i];
       const float ax = fabsf(x);
