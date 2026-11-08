@@ -890,6 +890,13 @@ static void drums_watch(bool running)
 		rot_was = st.rotation;
 		printk("ROTATED: slot 1 plays drum %u\n", (unsigned)((4u - st.rotation) & 3u) + 1u);
 	}
+	static uint32_t shed_was, shed_ms;
+	if (st.shed != shed_was && k_uptime_get_32() - shed_ms >= 1000u) {   /* once a second */
+		shed_ms = k_uptime_get_32();
+		printk("CPU guard: %u tail%s faded (%u since ON)\n", st.shed - shed_was,
+		       st.shed - shed_was == 1u ? "" : "s", st.shed);
+		shed_was = st.shed;
+	}
 	if (st.hits != hits_was) {
 		if (!running) {
 			printk("HIT drums 0x%x (%u)\n", st.last_hits, st.hits - hits_was);
@@ -2587,12 +2594,18 @@ int main(void)
 					sp.mrb_dest[k] = rt.dest[k];
 				}
 				sp.mrb_gtlt = rt.gtlt;
+#if defined(CONFIG_SP1_DRUMS)
+				/* The drums read Marbles' side first (drums_publish). */
 				struct sp1_marbles_params mp;
 				sp1_mui_params(&mp);
-#if defined(CONFIG_SP1_DRUMS)
 				drums_publish(&sp, &mp, &rt);
-#endif
 				sp1_synth_set_params(&sp);
+#else
+				sp1_synth_set_params(&sp);
+
+				struct sp1_marbles_params mp;
+				sp1_mui_params(&mp);
+#endif
 #if defined(CONFIG_SP1_DRUMS)
 				/* Tape slow: Marbles' clock bends with the machine (RATE is semitones). */
 				mp.rate += 12.0f * log2f(sp1_dui_speed());

@@ -198,6 +198,32 @@ int main(int argc, char** argv) {
     check(bad == 0 && e > 0, "tape slow at x0.33: finite and audible");
   }
 
+  // ---- the CPU guard: under load it fades a quiet tail, never a loud hit; at normal load nothing ----
+  {
+    sp1_synth_params p; fresh(p, 2, 0x0F);           // modal gamelan, long tails
+    for (int v = 0; v < 4; ++v) p.drums.decay[v] = 1.0f;
+    p.drums.fill = 0.5f;
+    Clock c(5u);
+    run(c, p, kBar);
+    const uint32_t s0 = st().shed;
+    for (int i = 0; i < kBar; ++i) {                  // 60 % of the budget: no shedding
+      sp1_drums_load((uint32_t)(0.6f * 24 * 1333.33f), 24u);
+      sp1_drums_frame f = c.next(); sp1_drums_begin(&p); sp1_drums_render(&f, out, 24);
+    }
+    const uint32_t s1 = st().shed;
+    // Overloaded, with the clock stopped so nothing is struck again: the tails fall under -20 dB
+    // and are faded one by one, after which nothing is left to shed.
+    Clock stopped(1u); stopped.running = false;
+    for (int i = 0; i < 48000 * 8 / 24; ++i) {
+      sp1_drums_load((uint32_t)(0.95f * 24 * 1333.33f), 24u);
+      sp1_drums_frame f = stopped.next(); sp1_drums_begin(&p); sp1_drums_render(&f, out, 24);
+    }
+    const uint32_t s2 = st().shed;
+    char what[160];
+    snprintf(what, sizeof what, "CPU guard: 60 %% load sheds %u; 95 %% load sheds %u ringing tails (1..4)", s1 - s0, s2 - s1);
+    check(s1 == s0 && s2 - s1 >= 1u && s2 - s1 <= 4u, what);
+  }
+
   // ---- the [drums] section of a preset ----
   {
     struct sp1_drums_patch a, b;

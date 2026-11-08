@@ -84,8 +84,12 @@ struct sp1_drums_status {
 	uint16_t rests[SP1_DRUMS_N];   /* per slot, bit = 16th of the bar             */
 	uint32_t hits;            /* voices struck since boot                          */
 	uint32_t bass_notes;      /* bass notes since boot                             */
+	uint32_t shed;            /* tails faded by the CPU guard since boot           */
 };
 void sp1_drums_status(struct sp1_drums_status *out);
+/* Audio thread, after each DMA block: the drum render's cycles for `frames` samples. Above
+ * 80 % of the budget the next block fades the quietest ringing tail (the CPU guard). */
+void sp1_drums_load(uint32_t cycles, uint32_t frames);
 
 #ifdef __cplusplus
 }

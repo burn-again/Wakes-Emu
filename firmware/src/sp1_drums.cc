@@ -151,6 +151,8 @@ constexpr uint32_t kMaxN = 24u;
 constexpr float kMsPerSample = 1000.0f / 48000.0f;
 constexpr float kRestWindowMs = 30.0f;     // a press this late in a step still takes it
 constexpr int kFadeSamples = 576;          // 12 ms: a choke fade (shorter thumps on low drums)
+constexpr float kShedAt = 0.80f;     // the CPU guard: a block's render above this share...
+constexpr float kShedTail = 0.1f;    // ...fades the quietest voice below this level (-20 dB)
 constexpr int kMap = 32;                   // the longest map / loop
 
 // ---- this block's controls, and the voices ----
@@ -206,7 +208,9 @@ float step_base;
 volatile int8_t st_step = -1;
 volatile uint8_t st_rot, st_last;
 volatile uint16_t st_rests[SP1_DRUMS_N];
-volatile uint32_t st_hits, st_bass;
+volatile uint32_t st_hits, st_bass, st_shed;
+// The last DMA block's drum render, as a share of its cycle budget (sp1_drums_load).
+float load_now;
 
 constexpr float kPenta[5] = {0.0f, 2.0f, 4.0f, 7.0f, 9.0f};
 
@@ -543,6 +547,30 @@ extern "C" void sp1_drums_begin(const sp1_synth_params* c) {
   tfx_set_carrier(&fx, ctl.fm_hz > 0.0f ? ctl.fm_hz : 196.0f);
   for (int i = 0; i < TB_NPARAM && i < 8; ++i) tb_set(&bass, static_cast<unsigned>(i), Clamp01(ctl.bass_p[i]));
   ApplyFx();
+  // The CPU guard: when the last block's render took over kShedAt of its budget, fade the
+  // quietest ringing voice if it is a tail (below -20 dB) -- one per block, over the usual
+  // 12 ms. It only acts in overload (every voice ringing long, every FX up), the way a
+  // hardware drum machine steals a voice, so the next block has room.
+  if (load_now > kShedAt) {
+    int q = -1;
+    float qe = kShedTail;
+    for (int v = 0; v < SP1_DRUMS_N; ++v) {
+      if (tk_active(&voice[v]) && fade_left[v] == 0 && voice[v].env < qe) {
+        q = v;
+        qe = voice[v].env;
+      }
+    }
+    if (q >= 0) {
+      Choke(q);
+      st_shed = st_shed + 1u;
+    }
+    load_now = 0.0f;                   // one per measured block
+  }
+}
+
+extern "C" void sp1_drums_load(uint32_t cycles, uint32_t frames) {
+  // 64 MHz / 48 kHz = 1333.3 cycles per sample (sp1_console.h)
+  load_now = frames > 0u ? static_cast<float>(cycles) / (static_cast<float>(frames) * 1333.33f) : 0.0f;
 }
 
 extern "C" void sp1_drums_clock(uint32_t frames, bool external) {
@@ -823,4 +851,5 @@ extern "C" void sp1_drums_status(struct sp1_drums_status* out) {
   for (int i = 0; i < SP1_DRUMS_N; ++i) out->rests[i] = st_rests[i];
   out->hits = st_hits;
   out->bass_notes = st_bass;
+  out->shed = st_shed;
 }

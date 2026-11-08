@@ -167,20 +167,13 @@ void tk_trigger(tk_voice *v, float vel) {
     break;
   }
   case TK_ENG_KS: {
+    /* The excitation is written as the loop first reaches it (ks_fill, from the render), not
+       here: a low note's line is ~1000 samples, and filling it at once made a strike cost a
+       fifth of a 2 ms block. Only the slot the first read's neighbour wraps to is cleared. */
     uint32_t len = (uint32_t)clampf(1.0f / v->freq, 4.0f, (float)(TK_KS_MAX - 2));
-    v->u.ks.len = len; v->u.ks.w = 0;
-    memset(v->u.ks.line, 0, sizeof v->u.ks.line);
-    for (uint32_t i = 0; i < len; ++i) {
-      float s;
-      switch (v->model) {
-      case 0: s = rndf(&v->rng); break;                                   /* noise burst */
-      case 1: s = (xs(&v->rng) & 1u) ? 1.0f : -1.0f; break;               /* +-1 burst  */
-      case 2: s = rndf(&v->rng) * (1.0f - (float)i / (float)len); break;  /* fading     */
-      default: s = (i % (len / 3u + 1u)) == 0 ? 1.0f : 0.0f; break;       /* impulses   */
-      }
-      v->u.ks.line[i] = (int16_t)(s * 24000.0f);
-    }
-    v->u.ks.w = len;
+    v->u.ks.len = len; v->u.ks.w = len;
+    v->u.ks.flo = v->u.ks.fhi = 0u;
+    v->u.ks.line[TK_KS_MAX - 1u] = 0;
     break;
   }
   case TK_ENG_AUTOMATON: {
@@ -209,25 +202,37 @@ void tk_trigger(tk_voice *v, float vel) {
     v->u.modal.live = 0u;
     float wsum = 0.0f;
     for (unsigned i = 0; i < TK_MODES; ++i) wsum += mm->w[i];
+    /* A strike is the voice's costliest moment, and four can land on one 16th, so the
+       per-partial work is kept to one sinf, one expf and a sqrt (one instruction on M4F):
+         TONE = brightness, a tilt of the initial levels: r^i, r = 2^(-(1-T) 1.6)
+         EXCITE = strike position (0 = centre, all modes; 1 = near the edge, a comb):
+                  |sin((i+1) th)| by the recurrence s(n+1) = 2 cos(th) s(n) - s(n-1)
+         MOD = upper partials die faster (decay base computed once)
+         cos w = 1 - 2 h^2, sin w = 2 h sqrt(1 - h^2), h = sin(w/2) -- w/2 <= 0.45 pi, so
+         the root is the positive one, and cos^2 + sin^2 = 1 to a rounding: the rotation's
+         radius stays k, as with cosf / sinf. */
+    const float tilt_r = exp2f(-(1.0f - T) * 1.6f);
+    const float th = 3.14159265f * (0.5f - 0.45f * X);
+    const float two_c = 2.0f * cosf(th);
+    float sn_prev = 0.0f, sn = sinf(th), tilt = 1.0f;
+    const float t0 = 0.02f * exp2f(D * 7.0f);
+    const float gain = 1.4f * v->env / wsum;
     for (unsigned i = 0; i < TK_MODES; ++i) {
       float f = v->freq * mm->r[i];
-      float audible = f < 0.45f ? 1.0f : 0.0f;          /* drop partials above ~21 kHz */
+      const float audible = f < 0.45f ? 1.0f : 0.0f;    /* drop partials above ~21 kHz */
       f = clampf(f, 0.0f, 0.45f);
-      float w = 6.2831853f * f;
-      /* TONE = brightness: tilt of initial partial levels */
-      float tilt = exp2f(-(float)i * (1.0f - T) * 1.6f);
-      /* EXCITE = strike position: 0 = centre (all modes), 1 = near the edge (comb) */
-      float pos = 0.5f - 0.45f * X;
-      float strike = fabsf(sinf(3.14159265f * (float)(i + 1) * pos));
-      const float amp = audible * mm->w[i] * tilt * (0.2f + 0.8f * strike) / wsum * 1.4f * v->env;
-      /* MOD = upper partials die faster */
-      float tsec = 0.02f * exp2f(D * 7.0f) * mm->d[i] / (1.0f + (float)i * M * 3.0f);
-      const float k = k_of(tsec);
+      const float h = sinf(3.14159265f * f);
+      const float cw = 1.0f - 2.0f * h * h, sw = 2.0f * h * sqrtf(1.0f - h * h);
+      const float amp = audible * mm->w[i] * tilt * (0.2f + 0.8f * fabsf(sn)) * gain;
+      const float k = k_of(t0 * mm->d[i] / (1.0f + (float)i * M * 3.0f));
       /* The decay rides on the rotation: (a, b) = k (cos w, sin w). Starting at s = amp / k
          makes the first output amp cos(w), as the separate-envelope form gave. */
-      v->u.modal.a[i] = k * cosf(w); v->u.modal.b[i] = k * sinf(w);
+      v->u.modal.a[i] = k * cw; v->u.modal.b[i] = k * sw;
       v->u.modal.c[i] = 0.0f; v->u.modal.s[i] = amp / k;
       if (amp > 0.0f) v->u.modal.live |= 1u << i;
+      tilt *= tilt_r;
+      const float nx = two_c * sn - sn_prev;
+      sn_prev = sn; sn = nx;
     }
     v->env_k = 1.0f;                           /* the partials carry their own decay */
     v->lp = (0.15f + 0.6f * T) * v->env;       /* mallet click level: brighter = harder beater */
@@ -251,6 +256,24 @@ static uint32_t ca_next(uint32_t x, uint32_t rule) {
   if (rule & 0x40u) y |=  l &  x & ~r;
   if (rule & 0x80u) y |=  l &  x &  r;
   return y ? y : 1u;
+}
+
+/* KS: write excitation samples [from, to) of the line (to <= len). */
+static void ks_fill(tk_voice *v, uint32_t from, uint32_t to, uint32_t *rng) {
+  const uint32_t len = v->u.ks.len;
+  int16_t *line = v->u.ks.line;
+  const float inv = 1.0f / (float)len;
+  const uint32_t third = len / 3u + 1u;
+  for (uint32_t i = from; i < to; ++i) {
+    float s;
+    switch (v->model) {
+    case 0: s = rndf(rng); break;                                     /* noise burst */
+    case 1: s = (xs(rng) & 1u) ? 1.0f : -1.0f; break;                 /* +-1 burst  */
+    case 2: s = rndf(rng) * (1.0f - (float)i * inv); break;           /* fading     */
+    default: s = (i % third) == 0u ? 1.0f : 0.0f; break;              /* impulses   */
+    }
+    line[i] = (int16_t)(s * 24000.0f);
+  }
 }
 
 void tk_render_add(tk_voice *v, float *out, unsigned n) {
@@ -399,6 +422,24 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
     const uint32_t L = v->u.ks.len;
     uint32_t w = v->u.ks.w;
     int16_t *line = v->u.ks.line;
+    if (w - L < L && !(v->u.ks.flo == 0u && v->u.ks.fhi == L)) {
+      /* First pass: this block reads ra = w + i - len(i) (and ra - 1), with len growing from
+         its value now to its value after n samples -- so [w - len_end - 1, w + n - len_now]. */
+      float pe_end = pe;
+      for (unsigned i = 0; i < n; ++i) pe_end *= pk;
+      const uint32_t len_now = L - (uint32_t)((float)L * 0.5f * X * pe);
+      const uint32_t len_end = L - (uint32_t)((float)L * 0.5f * X * pe_end);
+      const int32_t lo_i = (int32_t)(w - len_end) - 1;
+      uint32_t lo = lo_i < 0 ? 0u : (uint32_t)lo_i;
+      uint32_t hi = w + n - len_now + 1u;
+      if (hi > L) hi = L;
+      if (lo > hi) lo = hi;
+      uint32_t flo = v->u.ks.flo, fhi = v->u.ks.fhi;
+      if (fhi == flo) { flo = fhi = lo; }                /* nothing yet: start where it reads */
+      if (lo < flo) { ks_fill(v, lo, flo, &rng); flo = lo; }
+      if (hi > fhi) { ks_fill(v, fhi, hi, &rng); fhi = hi; }
+      v->u.ks.flo = (uint16_t)flo; v->u.ks.fhi = (uint16_t)fhi;
+    }
     for (unsigned i = 0; i < n; ++i) {
       const uint32_t len = L - (uint32_t)((float)L * 0.5f * X * pe);
       const uint32_t ra = (w - len) & (TK_KS_MAX - 1u), rb = (ra - 1u) & (TK_KS_MAX - 1u);

@@ -460,6 +460,9 @@ uint32_t (*midi_clock)(void);                // NULL = untimed (sp1_synth_set_mi
 
 extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
   const uint32_t prof_t0 = Now();
+#if defined(CONFIG_SP1_DRUMS)
+  const uint32_t frames_in = frames;
+#endif
   const uint32_t miss_t0 = Miss();
   uint32_t prof_eng = 0u;
   uint32_t prof_post = 0u;
@@ -859,6 +862,9 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
   }
   output_prev = omode;
   prof.eng = prof_eng;
+#if defined(CONFIG_SP1_DRUMS)
+  sp1_drums_load(prof_eng, frames_in);
+#endif
   prof.post = prof_post;
   prof.total = Now() - prof_t0;
   prof.miss_eng = miss_eng;
