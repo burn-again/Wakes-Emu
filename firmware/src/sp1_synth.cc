@@ -226,7 +226,13 @@ float drive_gain_prev = 1.0f;                // audio thread: last block's gain
 
 // M4e (Adara): UNEVEN steps, so the first is still a fattener and the last is a fuzz.
 // A flat 6 dB ladder would reach the same top but give up the subtle bottom end.
+#if defined(CONFIG_SP1_DRUMS)
+// The drum firmware's ladder tops out lower: a whole kit through +24 dB is a square wave,
+// and the drums' bus leveller already holds the mix at one level going in.
+const int kDriveDb[SP1_DRIVE_STEPS] = { 0, 3, 6, 10, 15 };
+#else
 const int kDriveDb[SP1_DRIVE_STEPS] = { 0, 3, 8, 15, 24 };
+#endif
 
 inline float DriveGain(int step) {
   if (step <= 0) {
@@ -594,12 +600,21 @@ extern "C" void sp1_synth_render(int16_t* out, uint32_t frames) {
   // Drive: one linear ramp across the DMA block, so a step never clicks. Both ends at
   // exactly 1.0 means the stage is off for the whole block and is skipped.
   const float drive_target = DriveGain(drive_step);
+#if defined(CONFIG_SP1_DRUMS)
+  // The drum firmware drives inside its own soft clip (sp1_drums_set_drive): one shaper,
+  // not two in series, and the stage below only converts to 16 bits.
+  sp1_drums_set_drive(drive_target);
+  const bool driving = false;
+  const float drive_inc = 0.0f;
+  float drive_g = 1.0f;
+#else
   const float drive_from = drive_gain_prev;
   const bool driving = drive_target > 1.0f || drive_from > 1.0f;
   const float drive_inc = frames ? (drive_target - drive_from) /
                                    static_cast<float>(frames) : 0.0f;
   float drive_g = drive_from;
   drive_gain_prev = drive_target;
+#endif
 
 #if defined(CONFIG_SP1_MIDI)
   // ---- MIDI's CC offsets (M5a), taken above ----

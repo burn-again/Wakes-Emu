@@ -7,8 +7,9 @@ the FX and the bass. Kits save in your PRST slots, and `WAKES/CNFG/drums.cnfg` h
 settings that have no fader.
 
 Everything Wakes does outside the voice is unchanged: power on and off, the `••` holds, the
-battery display, VOL, the drive (`••` + VOL), USB audio and MIDI, PRST slots (`••` + PLAY), the
-rip (`••` + PLAY held 3 s), and Marbles itself. `docs/UI-PAGES.md` still describes those.
+battery display, VOL, USB audio and MIDI, PRST slots (`••` + PLAY), the rip (`••` + PLAY held
+3 s), and Marbles itself. `docs/UI-PAGES.md` still describes those. One difference: the drive
+(`••` + VOL) — see *The output stage* below.
 
 ---
 
@@ -272,6 +273,22 @@ default and is named on the console (`CNFG drums.cnfg line 17: tape_release -- n
 | `sub` | 0.4 | the square an octave down, 0 … 1 |
 | `level` | −15 | dB in the mix, −40 … 0 |
 
+## The output stage
+
+Four voices, the bass and the bus FX meet in one place before they leave the drums:
+
+1. **A leveller** holds a stacked kit near one level: a peak follower that compresses 4:1 above
+   a threshold a single hit stays under, and lets go over 150 ms. A plain groove passes
+   untouched; everything playing at once comes down about 3 dB instead of piling into the clip.
+2. **SETTINGS F4 (bus drive)** and **`••` + VOL (the drive)** multiply into
+3. **one soft clip**, whose top is just under 16-bit full scale, so nothing after it ever clips
+   hard.
+
+The drive's steps in the drum firmware are **off, +3, +6, +10, +15 dB** (stock Wakes goes to +24
+dB, which turns a whole kit into a square wave). It is applied inside the drums' soft clip in
+place of Wakes' own drive stage, so it costs no extra CPU and the signal is shaped once, not
+twice.
+
 ## The log
 
 Every action names itself on the console: `PAGE drum 2`, `KIT 3: modal gamelan`,
@@ -289,15 +306,16 @@ there):
 
 | kits | groove | worst | worst + all FX | tape slow |
 |---|---|---|---|---|
-| all eight | 137–187 | 349–448 | 535–634 | 178–205 |
+| all eight | 144–194 | 356–455 | 542–641 | 185–211 |
 
 *Groove* is the sequencer on the kit's maps; *worst* adds every decay up, density and fill at
 full, t1–t3 cabled to slots and gated every 16th, X1–X3 and Y cabled, and the bass on every beat.
 A strike costs at most ~2,600 instructions (modal voices; most voices under 1,200).
 
 In the emulator's calibrated model (good to about ±7 points; Wakes' Plaits engines average
-56–82 % of a block on hardware): the sequencer with the bass and two FX averages **34–45 %**,
-with single blocks up to 62–103 % where four voices are struck together. The extreme case
+56–82 % of a block on hardware): the sequencer with the bass and two FX averages **35–43 %**,
+with single blocks up to 63–101 % where four voices are struck together; the drive adds
+nothing. The extreme case
 (the modal kit, every decay at maximum, all four FX near full) averages 74 % with blocks up to
 108 %. Wakes queues one block, so that is absorbed without dropouts (`fail=0`). As a safety net, a **CPU guard** fades the
 quietest ringing tail (below −20 dB) when a block's drum render goes over 80 % of the budget,

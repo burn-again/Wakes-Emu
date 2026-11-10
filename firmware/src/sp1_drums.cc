@@ -151,6 +151,13 @@ constexpr uint32_t kMaxN = 24u;
 constexpr float kMsPerSample = 1000.0f / 48000.0f;
 constexpr float kRestWindowMs = 30.0f;     // a press this late in a step still takes it
 constexpr int kFadeSamples = 576;          // 12 ms: a choke fade (shorter thumps on low drums)
+// The output stage. kOutScale keeps the old curve's small-signal gain (1.2 x 1.5 x 29000
+// = 52200 per machine unit) with its top moved from 43500 (over 16-bit full scale) to
+// kCeiling; kLevThresh is where a stacked kit starts to be held back (the clip's knee).
+constexpr float kCeiling = 32112.0f;                   // -0.2 dBFS: the clip's top
+constexpr float kOutScale = 52200.0f / kCeiling;
+constexpr float kLevThresh = 0.85f;
+constexpr float kLevRelease24 = 0.99667f;              // exp(-24 / (0.15 s x 48 kHz))
 constexpr float kShedAt = 0.80f;     // the CPU guard: a block's render above this share...
 constexpr float kShedTail = 0.1f;    // ...fades the quietest voice below this level (-20 dB)
 constexpr int kMap = 32;                   // the longest map / loop
@@ -193,6 +200,10 @@ float last_volts[4];
 
 // ---- tape slow: the machine renders at `speed` and is resampled to 48 kHz ----
 float hist[4];                             // the last four machine samples
+// The output stage (sp1_drums_render's end): the leveller's envelope and gain, the last
+// call's bus x drive gain, and the "••" + VOL drive sp1_synth hands over each DMA block.
+float lev_env, lev_gain = 1.0f, bus_prev = 0.0f;
+volatile float drive_to = 1.0f;
 float frac;                                // read position between hist[1] and hist[2]
 float chunk[kMaxN], slot_buf[kMaxN];
 
@@ -568,6 +579,10 @@ extern "C" void sp1_drums_begin(const sp1_synth_params* c) {
   }
 }
 
+extern "C" void sp1_drums_set_drive(float gain) {
+  drive_to = gain >= 1.0f ? gain : 1.0f;
+}
+
 extern "C" void sp1_drums_load(uint32_t cycles, uint32_t frames) {
   // 64 MHz / 48 kHz = 1333.3 cycles per sample (sp1_console.h)
   load_now = frames > 0u ? static_cast<float>(cycles) / (static_cast<float>(frames) * 1333.33f) : 0.0f;
@@ -829,12 +844,33 @@ extern "C" void sp1_drums_render(const sp1_drums_frame* f, float* out, uint32_t 
     }
   }
 
-  // A gentle soft clip, then the 16-bit scale sp1_synth's output stage takes from Plaits.
-  const float g = (ctl.bus_gain > 0.0f ? ctl.bus_gain : 1.0f) * 1.2f;
+  // ---- the output stage: leveller, drive, one soft clip ----
+  // The leveller holds a stacked kit near one level: a peak follower, 4:1 above kLevThresh,
+  // released over 150 ms. Its gain comes from the peaks up to the last call (0.5 ms behind;
+  // the clip catches what gets through first). Then SETTINGS' bus drive and the "••" + VOL
+  // drive (sp1_drums_set_drive) push into ONE soft clip, x / (1 + |x|), whose top is just
+  // under 16-bit full scale, so sp1_synth's stage never hard-clips what leaves here. Below
+  // the knee the gain is the old curve's (kOutScale), so a single hit is as loud as before.
+  const float x_lev = lev_env > kLevThresh ? kLevThresh / lev_env : 1.0f;
+  const float sq = sqrtf(x_lev);
+  const float lev_to = sq * sqrtf(sq);                  // x_lev^0.75: 4:1 above the knee
+  const float bus = (ctl.bus_gain > 0.0f ? ctl.bus_gain : 1.0f) * kOutScale * drive_to;
+  const float g_to = lev_to * bus;
+  const float g_from = lev_gain * bus_prev;
+  lev_gain = lev_to;
+  bus_prev = bus;
+  const float inc = n > 0u ? (g_to - g_from) / static_cast<float>(n) : 0.0f;
+  float g = g_from, pk = 0.0f;
   for (uint32_t i = 0; i < n; ++i) {
-    const float x = out[i] * g;
-    out[i] = x / (1.0f + fabsf(x)) * 1.5f * 29000.0f;
+    const float in = out[i];
+    const float a = fabsf(in);
+    pk = a > pk ? a : pk;
+    g += inc;
+    const float x = in * g;
+    out[i] = x / (1.0f + fabsf(x)) * kCeiling;
   }
+  const float rel = n >= 24u ? kLevRelease24 : 1.0f - (1.0f - kLevRelease24) * static_cast<float>(n) / 24.0f;
+  lev_env = pk > lev_env ? pk : lev_env * rel;
 
   // ---- the snapshot ----
   st_step = static_cast<int8_t>(step);

@@ -90,6 +90,9 @@ void sp1_drums_status(struct sp1_drums_status *out);
 /* Audio thread, after each DMA block: the drum render's cycles for `frames` samples. Above
  * 80 % of the budget the next block fades the quietest ringing tail (the CPU guard). */
 void sp1_drums_load(uint32_t cycles, uint32_t frames);
+/* Audio thread, each DMA block: the "••" + VOL drive as a linear gain (1 = off), applied
+ * inside the drums' own soft clip in place of sp1_synth's drive stage. */
+void sp1_drums_set_drive(float gain);
 
 #ifdef __cplusplus
 }

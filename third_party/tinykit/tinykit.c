@@ -80,6 +80,24 @@ static inline float sin_p(uint32_t p) {        /* linear-interp table sine */
 #define TK_MODAL_DEAD 1e-5f        /* a modal partial below this (-100 dB) stops */
 static float k_of(float seconds) { return expf(-6.9078f / (seconds * SR)); }
 static float note_hz(float pitch01) { return 440.0f * exp2f((pitch01 * 120.0f - 69.0f) / 12.0f); }
+/* The modal strike's two per-partial functions, without libm (a strike is the voice's
+   costliest moment; see the strike in tk_trigger):
+   sin_q: sin x on [0, 1.42] (0.45 pi), odd Taylor to x^11: under 3e-8 there, which moves a
+   partial by well under a thousandth of a cent -- and the rotation built from it stays
+   exactly stable whatever its error (cos w = 1 - 2h^2, sin w = 2h sqrt(1 - h^2)).
+   k_of_fast: k_of for a >= 2 ms decay, where its exponent a = 6.9 / (t SR) <= 0.072: a
+   series to a^5, under 3e-10 from expf, so k stays below 1 (its 1 - k is >= 3e-5). Shorter
+   decays fall back to k_of. */
+static inline float sin_q(float x) {
+  const float x2 = x * x;
+  return x * (1.0f + x2 * (-1.0f / 6.0f + x2 * (1.0f / 120.0f + x2 * (-1.0f / 5040.0f +
+         x2 * (1.0f / 362880.0f + x2 * (-1.0f / 39916800.0f))))));
+}
+static inline float k_of_fast(float seconds) {
+  if (seconds < 0.002f) return k_of(seconds);
+  const float a = 6.9078f / (seconds * SR);
+  return 1.0f - a * (1.0f - a * (0.5f - a * (1.0f / 6.0f - a * (1.0f / 24.0f - a * (1.0f / 120.0f)))));
+}
 
 /* ------------------------------------------------------------------- API */
 void tk_init(tk_voice *v, unsigned engine, unsigned model) {
@@ -221,10 +239,10 @@ void tk_trigger(tk_voice *v, float vel) {
       float f = v->freq * mm->r[i];
       const float audible = f < 0.45f ? 1.0f : 0.0f;    /* drop partials above ~21 kHz */
       f = clampf(f, 0.0f, 0.45f);
-      const float h = sinf(3.14159265f * f);
+      const float h = sin_q(3.14159265f * f);
       const float cw = 1.0f - 2.0f * h * h, sw = 2.0f * h * sqrtf(1.0f - h * h);
       const float amp = audible * mm->w[i] * tilt * (0.2f + 0.8f * fabsf(sn)) * gain;
-      const float k = k_of(t0 * mm->d[i] / (1.0f + (float)i * M * 3.0f));
+      const float k = k_of_fast(t0 * mm->d[i] / (1.0f + (float)i * M * 3.0f));
       /* The decay rides on the rotation: (a, b) = k (cos w, sin w). Starting at s = amp / k
          makes the first output amp cos(w), as the separate-envelope form gave. */
       v->u.modal.a[i] = k * cw; v->u.modal.b[i] = k * sw;
