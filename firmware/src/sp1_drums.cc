@@ -363,9 +363,13 @@ void RenderMachine(float* buf, uint32_t m) {
       fade_left[v] = 0;
       continue;
     }
+    const float g = ctl.level[v];
+    if (fade_left[v] == 0 && voice[v].engine != TK_ENG_CLASSIC) {
+      tk_render_mix(&voice[v], buf, m, g);           // straight into the mix, at its level
+      continue;
+    }
     for (uint32_t i = 0; i < m; ++i) slot_buf[i] = 0.0f;
     tk_render_add(&voice[v], slot_buf, m);
-    const float g = ctl.level[v];
     if (fade_left[v] > 0) {
       // smoothstep down: a raised-cosine shape without a cosf per sample
       for (uint32_t i = 0; i < m; ++i) {
@@ -382,10 +386,7 @@ void RenderMachine(float* buf, uint32_t m) {
     }
   }
   if (ctl.bass_mode != SP1_BASS_OFF && tb_active(&bass)) {
-    for (uint32_t i = 0; i < m; ++i) slot_buf[i] = 0.0f;
-    tb_render_add(&bass, slot_buf, m);
-    const float g = ctl.bass_level;
-    for (uint32_t i = 0; i < m; ++i) buf[i] += slot_buf[i] * g;
+    tb_render_mix(&bass, buf, m, ctl.bass_level);
   }
   tfx_process(&fx, buf, nullptr, m);
 }

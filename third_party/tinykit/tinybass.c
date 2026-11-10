@@ -42,44 +42,73 @@ void tb_note(tb_voice *v, float note, float vel) {
   v->fenv = 1.0f;
 }
 
-void tb_render_add(tb_voice *v, float *out, unsigned n) {
+void tb_render_add(tb_voice *v, float *out, unsigned n) { tb_render_mix(v, out, n, 1.0f); }
+
+/* tb_render_add at a gain (after the warmth), so a caller needs no scratch buffer. */
+void tb_render_mix(tb_voice *restrict v, float *restrict out, unsigned n, float gain) {
   if (!tb_active(v)) return;
   const float shape = v->p[TB_SHAPE], sub = v->p[TB_SUB] * 0.7f;
   /* saw -> square over the first half of SHAPE, square -> triangle over the second */
   const float m_sq = shape < 0.5f ? shape * 2.0f : 1.0f, m_tri = shape < 0.5f ? 0.0f : (shape - 0.5f) * 2.0f;
+  /* Only what SHAPE lets you hear is computed: the saw below the square, the square (and the
+     triangle integrated from it) from just above the saw. The triangle still leaks along
+     while it is silent, so it is settled if SHAPE comes back up. */
+  const int need_saw = m_sq < 1.0f, need_sq = m_sq > 0.0f || m_tri > 0.0f;
   float tri = v->tri;
   const float cut = 30.0f * exp2f(v->p[TB_CUTOFF] * 7.0f);           /* 30 Hz .. 3.8 kHz */
   const float envamt = v->p[TB_ENV] * 6.0f;                          /* up to +6 octaves (approx.) */
   const float damp = 2.0f - 1.85f * v->p[TB_RES];
   const float atk_step = 1.0f / (0.003f * SR);
+  const float target = v->target, glide_k = v->glide_k, amp_k = v->amp_k, fenv_k = v->fenv_k;
+  const float vel = v->vel * 0.5f, gk = 6.2831853f / SR;
   float freq = v->freq, amp = v->amp, fenv = v->fenv, lp = v->lp, bp = v->bp, att = v->attack;
   uint32_t ph = v->phase, sph = v->sub_phase;
+  /* a finished glide: the frequency, and so the phase step, are constant for the block.
+     The one-pole only approaches its target, so within a millionth (0.002 cent) it snaps. */
+  if (fabsf(target - freq) < target * 1e-6f) freq = target;
+  const int gliding = freq != target;
+  uint32_t inc = (uint32_t)(freq * TWO32);
   for (unsigned i = 0; i < n; ++i) {
-    freq += (v->target - freq) * v->glide_k;
-    const uint32_t inc = (uint32_t)(freq * TWO32);
+    if (gliding) {
+      freq += (target - freq) * glide_k;
+      inc = (uint32_t)(freq * TWO32);
+    }
     ph += inc; sph += inc >> 1;
     const float dt = freq, t = (float)ph * (1.0f / TWO32);
-    /* saw and square, both band-limited */
-    const float saw = 1.0f - 2.0f * t + blep(t, dt);                     /* falling saw: its fundamental is in phase with the square's */
-    float t2 = t + 0.5f; t2 -= (float)(int32_t)t2;
-    const float sq = (t < 0.5f ? 1.0f : -1.0f) + blep(t, dt) - blep(t2, dt);
-    tri = tri * 0.9995f + sq * 4.0f * dt;                                /* integrate the square */
-    const float wav = saw + (sq - saw) * m_sq;
-    const float osc = wav + (tri * 0.95f - wav) * m_tri + ((sph >> 31) ? sub : -sub);
+    /* saw and square, both band-limited; their shared edge's residual once */
+    const float bl = blep(t, dt);
+    float osc;
+    if (need_sq) {
+      float t2 = t + 0.5f; t2 -= (float)(int32_t)t2;
+      const float sq = (t < 0.5f ? 1.0f : -1.0f) + bl - blep(t2, dt);
+      tri = tri * 0.9995f + sq * 4.0f * dt;                              /* integrate the square */
+      const float wav = need_saw ? (1.0f - 2.0f * t + bl) + (sq - (1.0f - 2.0f * t + bl)) * m_sq : sq;
+      osc = wav + (tri * 0.95f - wav) * m_tri;
+    } else {
+      osc = 1.0f - 2.0f * t + bl;                                        /* falling saw */
+    }
+    osc += (sph >> 31) ? sub : -sub;
     /* filter cutoff follows its envelope; g ~ 2 pi fc / fs is fine below ~5 kHz */
     float fc = cut * (1.0f + envamt * fenv * fenv);
     if (fc > 6000.0f) fc = 6000.0f;
-    const float g = 6.2831853f * fc / SR;
+    const float g = gk * fc;
     const float hp = osc - lp - damp * bp;
     bp += g * hp;
     lp += g * bp;
     /* amp: 3 ms attack ramp, then exponential decay */
     if (att > 0.0f) { amp += atk_step; if (amp >= 1.0f) { amp = 1.0f; att = 0.0f; } }
-    else amp *= v->amp_k;
-    fenv *= v->fenv_k;
-    float y = lp * amp * v->vel * 0.5f;
+    else amp *= amp_k;
+    fenv *= fenv_k;
+    float y = lp * amp * vel;
     y = y * (1.5f - 0.5f * clampf(y * y, 0.0f, 1.0f));                 /* gentle warmth */
-    out[i] += y;
+    out[i] += y * gain;
+  }
+  if (!need_sq) {
+    /* the triangle was not integrated: leave it where the square would have put it at this
+       phase (rising from -1 over the square's high half), so turning SHAPE up later starts
+       it in place rather than from zero */
+    const float t = (float)ph * (1.0f / TWO32);
+    tri = t < 0.5f ? 4.0f * t - 1.0f : 3.0f - 4.0f * t;
   }
   v->freq = freq; v->amp = amp; v->fenv = fenv; v->lp = lp; v->bp = bp; v->attack = att;
   v->phase = ph; v->sub_phase = sph; v->tri = tri;

@@ -439,6 +439,13 @@ if(CONFIG_SP1_PLAITS)
 			${TINYKIT}/tinykit.c ${TINYKIT}/tinyfx.c
 			${TINYKIT}/tinybass.c)
 		zephyr_library_include_directories(${TINYKIT})
+		# The drums' audio-thread code gets loop-invariant motion back (Plaits' flags below
+		# turn it off) and loop unswitching: their per-sample loops branch on a voice's model
+		# and its fader amounts, which do not change within a block. Same arithmetic, so the
+		# same output; -15 % of the worst-case render on the M4 bench.
+		set_source_files_properties(src/sp1_drums.cc ${TINYKIT}/tinykit.c ${TINYKIT}/tinyfx.c
+			${TINYKIT}/tinybass.c PROPERTIES
+			COMPILE_OPTIONS "-fmove-loop-invariants;-funswitch-loops")
 		# The "classic" voices (CONFIG_SP1_CLASSIC): GPL-3.0, all in third_party/tinykit/lxr.
 		# A bin built with them is GPL-3.0; without the option none of this code is linked.
 		# Upstream DSP code: its own include paths and no warnings (it is not ours to fix).

@@ -45,7 +45,7 @@ static svf_c svf_for(float a) {
   return c;
 }
 
-void tfx_process(tfx_state *s, float *l, float *r, unsigned n) {
+void tfx_process(tfx_state *restrict s, float *restrict l, float *restrict r, unsigned n) {
   if (!n) return;
   const float inv = 1.0f / (float)n;
   float *ch[2] = {l, r};
@@ -55,7 +55,20 @@ void tfx_process(tfx_state *s, float *l, float *r, unsigned n) {
     float a = s->prev[TFX_FM], da = (s->amt[TFX_FM] - a) * inv;
     uint32_t ph = s->fm_phase; float env = s->fm_env;
     const float fc = s->fm_hz / SR * 4294967296.0f;          /* the carrier, in phase units */
-    for (unsigned i = 0; i < n; ++i, a += da) {
+    if (da == 0.0f && !r) {
+      /* the amount is not moving (most blocks): the same sums with a's terms worked out once */
+      const float depth = a * a * 2600.0f / SR * 4294967296.0f;
+      const float wet = clampf(a * 2.0f, 0.0f, 1.0f), dry = 1.0f - 0.85f * wet;
+      for (unsigned i = 0; i < n; ++i) {
+        const float x = l[i];
+        const float ax = fabsf(x);
+        env += (ax > env ? 0.5f : 0.0015f) * (ax - env);
+        ph += (uint32_t)(int32_t)(fc + depth * x * 2.0f);
+        const float y = sin_p(ph) * env * 1.6f;
+        l[i] = l[i] * dry + y * wet;
+      }
+    }
+    for (unsigned i = (da == 0.0f && !r) ? n : 0u; i < n; ++i, a += da) {
       const float x = r ? 0.5f * (l[i] + r[i]) : l[i];
       const float ax = fabsf(x);
       env += (ax > env ? 0.5f : 0.0015f) * (ax - env);
@@ -75,6 +88,16 @@ void tfx_process(tfx_state *s, float *l, float *r, unsigned n) {
       if (!ch[c]) continue;
       float a = s->prev[TFX_FOLD], da = (s->amt[TFX_FOLD] - a) * inv;
       float *x = ch[c];
+      if (da == 0.0f) {                                         /* steady: a's terms once */
+        const float g = 1.0f + 8.0f * a;
+        const float trim = 1.0f - 0.1f * clampf(a * 10.0f, 0.0f, 1.0f);
+        for (unsigned i = 0; i < n; ++i) {
+          float t = x[i] * g * 0.25f + 64.25f;
+          t -= (float)(int32_t)t;
+          x[i] = (1.0f - 4.0f * fabsf(t - 0.5f)) * trim;
+        }
+        continue;
+      }
       for (unsigned i = 0; i < n; ++i, a += da) {
         const float g = 1.0f + 8.0f * a;
         float t = x[i] * g * 0.25f + 64.25f;                  /* +64 keeps it positive for the cheap floor */
@@ -91,6 +114,30 @@ void tfx_process(tfx_state *s, float *l, float *r, unsigned n) {
       if (!ch[c]) continue;
       float a = s->prev[TFX_CHEBY], da = (s->amt[TFX_CHEBY] - a) * inv;
       float *x = ch[c];
+      if (da == 0.0f) {
+        /* steady: the harmonic pair and the wet mix once, and only the two orders it blends */
+        const float h = a * 2.999f;
+        const int hi = (int)h; const float f = h - (float)hi;
+        const float wet = clampf(a * 5.0f, 0.0f, 1.0f), dry = 1.0f - wet, w8 = 0.8f * wet;
+        for (unsigned i = 0; i < n; ++i) {
+          const float xs = clampf(x[i] * 1.4f, -1.0f, 1.0f);
+          const float t2 = 2.0f * xs * xs - 1.0f, t3 = 2.0f * xs * t2 - xs;
+          float y;
+          if (hi == 0) {
+            y = (t2 + 1.0f) + ((t3) - (t2 + 1.0f)) * f;
+          } else {
+            const float t4 = 2.0f * xs * t3 - t2;
+            if (hi == 1) {
+              y = t3 + ((t4 - 1.0f) - t3) * f;
+            } else {
+              const float t5 = 2.0f * xs * t4 - t3;
+              y = (t4 - 1.0f) + (t5 - (t4 - 1.0f)) * f;
+            }
+          }
+          x[i] = x[i] * dry + y * w8;
+        }
+        continue;
+      }
       for (unsigned i = 0; i < n; ++i, a += da) {
         const float xs = clampf(x[i] * 1.4f, -1.0f, 1.0f);
         const float t2 = 2.0f * xs * xs - 1.0f, t3 = 2.0f * xs * t2 - xs;
@@ -145,6 +192,28 @@ void tfx_process(tfx_state *s, float *l, float *r, unsigned n) {
         const float d1 = (B.a1 - a1) * inv, d2 = (B.a2 - a2) * inv, d3 = (B.a3 - a3) * inv, dk = (B.k - k) * inv;
         float ic1 = s->ic1[c], ic2 = s->ic2[c];
         float *x = ch[c];
+        if (d1 == 0.0f && d2 == 0.0f && d3 == 0.0f && dk == 0.0f) {
+          /* steady cutoff (most blocks): no coefficient ramp, one mode */
+          if (mode == 1) {
+            for (unsigned i = 0; i < n; ++i) {
+              const float v3 = x[i] - ic2;
+              const float v1 = a1 * ic1 + a2 * v3;
+              const float v2 = ic2 + a2 * ic1 + a3 * v3;
+              ic1 = 2.0f * v1 - ic1; ic2 = 2.0f * v2 - ic2;
+              x[i] = v2;
+            }
+          } else {
+            for (unsigned i = 0; i < n; ++i) {
+              const float v3 = x[i] - ic2;
+              const float v1 = a1 * ic1 + a2 * v3;
+              const float v2 = ic2 + a2 * ic1 + a3 * v3;
+              ic1 = 2.0f * v1 - ic1; ic2 = 2.0f * v2 - ic2;
+              x[i] = x[i] - k * v1 - v2;
+            }
+          }
+          s->ic1[c] = ic1; s->ic2[c] = ic2;
+          continue;
+        }
         for (unsigned i = 0; i < n; ++i) {
           const float v3 = x[i] - ic2;
           const float v1 = a1 * ic1 + a2 * v3;

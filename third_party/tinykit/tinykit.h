@@ -64,6 +64,9 @@ void  tk_set(tk_voice *v, unsigned ctl, float value);   /* latched at the next t
 void  tk_trigger(tk_voice *v, float velocity);
 /* Adds the voice into out[] (mono), so a kit is several calls on one buffer. */
 void  tk_render_add(tk_voice *v, float *out, unsigned n);
+/* tk_render_add at a gain, applied in the voice's own output multiply. Every engine but the
+   LXR voices (TK_ENG_CLASSIC), which render at unity whatever the gain. */
+void  tk_render_mix(tk_voice *v, float *out, unsigned n, float gain);
 int   tk_active(const tk_voice *v);
 unsigned tk_voice_size(void);
 void  tk_choke(tk_voice *v);                 /* silence at once (rests) */

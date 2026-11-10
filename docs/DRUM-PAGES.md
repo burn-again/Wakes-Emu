@@ -301,22 +301,33 @@ stopped.
 
 ## CPU
 
-On the M4 harness (instructions per sample, averaged over 3 s; Plaits' engines are 417–532
-there):
+On the M4 harness, compiled with the firmware's own flags (instructions per sample, averaged
+over 3 s; Plaits' engines are 417–532 there):
 
 | kits | groove | worst | worst + all FX | tape slow |
 |---|---|---|---|---|
-| all eight | 144–194 | 356–455 | 542–641 | 185–211 |
+| all eight | 125–163 | 267–335 | 389–454 | 165–183 |
 
 *Groove* is the sequencer on the kit's maps; *worst* adds every decay up, density and fill at
 full, t1–t3 cabled to slots and gated every 16th, X1–X3 and Y cabled, and the bass on every beat.
 A strike costs at most ~2,600 instructions (modal voices; most voices under 1,200).
 
+Where it goes, per sample: a voice 9–65 (fresh modal voices and the FM drums are the
+heaviest), the four bus FX together 121, the bass ~100 while it sounds. The voices and the bass
+add straight into the mix at their level; the FX work their amounts out once per block while a
+fader is still; and the drums' audio code is built with loop-invariant motion and loop
+unswitching (CMakeLists.txt), which Plaits' flags otherwise turn off.
+
 In the emulator's calibrated model (good to about ±7 points; Wakes' Plaits engines average
-56–82 % of a block on hardware): the sequencer with the bass and two FX averages **35–43 %**,
-with single blocks up to 63–101 % where four voices are struck together; the drive adds
-nothing. The extreme case
-(the modal kit, every decay at maximum, all four FX near full) averages 74 % with blocks up to
-108 %. Wakes queues one block, so that is absorbed without dropouts (`fail=0`). As a safety net, a **CPU guard** fades the
-quietest ringing tail (below −20 dB) when a block's drum render goes over 80 % of the budget,
-one voice per block, and logs `CPU guard: n tails faded`. Watch the `AUD` line on hardware.
+56–82 % of a block on hardware), with the sequencer, the bass on the Y clock and two FX:
+
+| tempo | average | heaviest block |
+|---|---|---|
+| normal | 32–39 % | 58–86 % |
+| Marbles' RATE high, or ×4 | 62–71 % | 77–89 % |
+
+The modal kits (modal gamelan, iron vibes) peak highest, when four voices are struck on the
+same 16th. Wakes queues one block, so a single block over budget is absorbed without a
+dropout. As a safety net, a **CPU guard** fades the quietest ringing tail (below −20 dB) when
+a block's drum render goes over 80 % of the budget, one voice per block, and logs
+`CPU guard: n tails faded`. Watch the `AUD` line on hardware (`fail=` counts dropouts).

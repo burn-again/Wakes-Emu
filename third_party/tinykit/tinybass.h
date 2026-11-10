@@ -27,6 +27,7 @@ void tb_init(tb_voice *v);
 void tb_set(tb_voice *v, unsigned param, float value);      /* 0..1 */
 void tb_note(tb_voice *v, float note, float velocity);       /* glides if GLIDE > 0 and a note is sounding */
 void tb_render_add(tb_voice *v, float *out, unsigned n);
+void tb_render_mix(tb_voice *v, float *out, unsigned n, float gain);   /* the same at a gain */
 int  tb_active(const tb_voice *v);
 unsigned tb_voice_size(void);
 

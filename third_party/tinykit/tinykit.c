@@ -294,8 +294,13 @@ static void ks_fill(tk_voice *v, uint32_t from, uint32_t to, uint32_t *rng) {
   }
 }
 
-void tk_render_add(tk_voice *v, float *out, unsigned n) {
+void tk_render_add(tk_voice *v, float *out, unsigned n) { tk_render_mix(v, out, n, 1.0f); }
+
+/* The voice, added into out[] at `gain` -- in its own output multiply, so a caller mixing
+   several voices needs no scratch buffer and no second pass. */
+void tk_render_mix(tk_voice *restrict v, float *restrict out, unsigned n, float gain) {
 #ifdef TK_WITH_LXR
+  /* the LXR voices take no gain: sp1_drums mixes them through a buffer (tk_mixes_gain) */
   if (v->engine == TK_ENG_CLASSIC) { lx_render_add(v->model, out, n); v->env = lx_active(v->model) ? 1.0f : 0.0f; return; }
 #endif
   if (!tk_active(v)) return;
@@ -323,7 +328,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
       case 6: y = (a * 0x200000u) / (t + 2048u); break;                      /* tom */
       default: y = ((t * a) ^ (t >> (c + 2u))) | (t >> b); break;            /* crunch */
       }
-      out[i] += (float)((int32_t)(y & 0xFFu) - 128) * (1.0f / 128.0f) * env;
+      out[i] += (float)((int32_t)(y & 0xFFu) - 128) * (1.0f / 128.0f) * env * gain;
       env *= ek;
     }
     v->phase = ph;
@@ -358,7 +363,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
       } else {                        /* 12.5% pulse */
         y = (ph >> 29) == 0 ? 1.0f : -0.14f;
       }
-      out[i] += y * 0.7f * env;
+      out[i] += y * 0.7f * env * gain;
       env *= ek; pe *= pk;
     }
     v->reg = reg; v->phase = ph; v->hold = (int32_t)y;
@@ -394,7 +399,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
         break;
       }
       }
-      out[i] += y * 0.5f * env;
+      out[i] += y * 0.5f * env * gain;
       env *= ek; pe *= pk;
     }
     v->phase = ph; v->phase2 = ph2; v->hold = mono;
@@ -426,7 +431,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
         slope = (a1 - a0) / (float)dur;
         y = a0;
       } else y += slope;
-      out[i] += y * 0.8f * env;
+      out[i] += y * 0.8f * env * gain;
       env *= ek;
     }
     v->u.gendy.idx = idx; v->u.gendy.pos = pos; v->u.gendy.a0 = a0; v->u.gendy.a1 = a1; v->lp = y;
@@ -466,7 +471,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
       if ((r >> 16) < flip) s = -s;
       line[w & (TK_KS_MAX - 1u)] = (int16_t)s;
       ++w;
-      out[i] += (float)s * (1.0f / 24000.0f) * env;
+      out[i] += (float)s * (1.0f / 24000.0f) * env * gain;
       env *= ek; pe *= pk;
     }
     v->u.ks.w = w;
@@ -485,7 +490,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
       const uint32_t inc = inc_of(f0 * 4.0f * (1.0f + 6.0f * pe));  /* MOD = rate fall (pitch_k) */
       ph += inc;
       if (ph < inc) { reg = ca_next(reg, rule); y = (float)popc(reg & mask) * norm - 1.0f; }
-      out[i] += y * 0.6f * env;
+      out[i] += y * 0.6f * env * gain;
       env *= ek; pe *= pk;
     }
     v->reg = reg; v->phase = ph; v->lp = y;
@@ -516,7 +521,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
       case 2: y = cv * 1.6f - 0.8f; break;
       default: y = tri(pa) * 0.9f; break;
       }
-      out[i] += y * env;
+      out[i] += y * env * gain;
       env *= ek;
     }
     v->phase = pa; v->phase2 = pb; v->reg = reg;
@@ -562,7 +567,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
         break;
       }
       }
-      out[i] += y * 0.8f * env;
+      out[i] += y * 0.8f * env * gain;
       env *= ek; pe *= pk;
     }
     v->phase = p1; v->phase2 = p2; v->u.fm.fb1 = fb1; v->u.fm.fb2 = fb2;
@@ -575,7 +580,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
     /* MOD = number of beads (0.5 = the instrument's own count) */
     const uint32_t chance = (uint32_t)((float)beads[v->model] * exp2f((M - 0.5f) * 4.0f) * 2.5f);
     static const float outg[5] = {8.5f, 3.5f, 4.5f, 1.5f, 2.3f};   /* level-match the five instruments */
-    const float sd = sdecay[v->model], og = outg[v->model] * 0.6f;
+    const float sd = sdecay[v->model], og = outg[v->model] * 0.6f * gain;
     const float g0 = v->u.shk.gain[0], g1 = v->u.shk.gain[1], g2 = v->u.shk.gain[2];
     float energy = v->u.shk.energy, level = v->lp;
     for (unsigned i = 0; i < n; ++i) {
@@ -604,7 +609,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
     uint32_t live = v->u.modal.live;
     float click = v->lp;
     if (click != 0.0f) {                         /* ~1 ms beater click */
-      for (unsigned i = 0; i < n; ++i) { out[i] += rndf(&rng) * click; click *= 0.93f; }
+      for (unsigned i = 0; i < n; ++i) { out[i] += rndf(&rng) * click * gain; click *= 0.93f; }
       v->lp = click < 1e-5f ? 0.0f : click;
     }
     /* the live partials, then two at a time: one load and store of out[] serves both */
@@ -619,7 +624,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
         const float n0 = a0 * c0 - b0 * s0, n1 = a1 * c1 - b1 * s1;
         s0 = b0 * c0 + a0 * s0; s1 = b1 * c1 + a1 * s1;
         c0 = n0; c1 = n1;
-        out[i] += s0 + s1;
+        out[i] += (s0 + s1) * gain;
       }
       C[j0] = c0; S[j0] = s0; C[j1] = c1; S[j1] = s1;
     }
@@ -631,7 +636,7 @@ void tk_render_add(tk_voice *v, float *out, unsigned n) {
         const float cn = a * c - b * s;
         s = b * c + a * s;
         c = cn;
-        out[i] += s;
+        out[i] += s * gain;
       }
       C[j] = c; S[j] = s;
     }
