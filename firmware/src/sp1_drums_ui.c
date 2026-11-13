@@ -37,6 +37,8 @@
 #define L_DRUM_SH(n)    (3 + 2 * (n))
 #define L_SET           10
 #define L_SET_SH        11       /* the bass */
+#define L_LANE          12       /* the acid lanes' densities */
+#define L_LANE_SH       13       /* ...and loop lengths       */
 
 /* Everything a preset holds (sp1_drums_patch.h): the kit, the voices, the twelve layers'
  * values, FX, mutes, rests, the bass mode, the patterns and the cables. */
@@ -75,7 +77,7 @@ static uint32_t ffwd_ms;
  * sound faders and how many takes it keeps; add pushes a new one, up to ACID_HOMES deep. */
 #define ACID_HOMES   4
 #define ACID_HOLD_MS 600u            /* the rocker held this long: add (FFWD) / snap back (RWD) */
-static float    acid_home[ACID_HOMES][4];
+static float    acid_home[ACID_HOMES][12];   /* the sound's four, the lanes' densities and lengths */
 static uint8_t  acid_home_takes[ACID_HOMES];
 static int      acid_homes;          /* 0: not set yet (a preset was loaded, the mode stepped) */
 static uint32_t acid_ff_ms, acid_rw_ms;
@@ -83,6 +85,27 @@ static bool     acid_ff_done, acid_rw_done, acid_snap_pending;
 static int8_t   acid_step_was = -1;
 static uint32_t acid_keep_seq, acid_undo_seq, acid_snap_seq;
 static uint8_t  acid_snap_to;
+static int8_t   lane_len_was[4] = { -1, -1, -1, -1 };
+
+static void acid_home_get(float h[12])
+{
+	memcpy(h, stored[L_SET_SH], sizeof stored[0]);
+	memcpy(h + 4, stored[L_LANE], sizeof stored[0]);
+	memcpy(h + 8, stored[L_LANE_SH], sizeof stored[0]);
+}
+static void acid_home_put(const float h[12])
+{
+	memcpy(stored[L_SET_SH], h, sizeof stored[0]);
+	memcpy(stored[L_LANE], h + 4, sizeof stored[0]);
+	memcpy(stored[L_LANE_SH], h + 8, sizeof stored[0]);
+}
+/* A lane's loop from its fader: eight zones, the top one the pattern's own (0). */
+static uint8_t lane_len(int l)
+{
+	int z = (int)(stored[L_LANE_SH][l] * (float)SP1_ACID_LEN_ZONES);
+	z = z < 0 ? 0 : (z > SP1_ACID_LEN_ZONES - 1 ? SP1_ACID_LEN_ZONES - 1 : z);
+	return sp1_acid_len_zone(z);
+}
 static bool     burst;
 static float    speed = 1.0f;
 static uint8_t  audition;
@@ -112,7 +135,8 @@ static float detent(float p, float w)
 
 static bool bipolar(int l, int i)
 {
-	return l == L_KIT || (l == L_KIT_SH && i == 0);   /* KIT's offsets and fill, the filter */
+	return l == L_KIT || (l == L_KIT_SH && i == 0)    /* KIT's offsets and fill, the filter */
+	       || l == L_LANE;                             /* a lane's density: centred = as written */
 }
 
 /* DRUM n + SHIFT F3 (the loop length) and the bass octave: zones of their faders. */
@@ -149,6 +173,9 @@ static int layer_of(enum sp1_dui_page p, bool shift)
 	if (p == SP1_DUI_SETTINGS) {
 		return shift ? L_SET_SH : L_SET;
 	}
+	if (p == SP1_DUI_LANES) {
+		return shift ? L_LANE_SH : L_LANE;
+	}
 	return 2 * (int)p + (shift ? 1 : 0);
 }
 
@@ -182,6 +209,9 @@ static void page_glyph(enum sp1_dui_page p)
 		lv[p - SP1_DUI_DRUM1] = SP1_ENGINE_LED_FULL;
 	} else if (p == SP1_DUI_KIT) {
 		lv[0] = lv[1] = lv[2] = lv[3] = SP1_ENGINE_LED_HALF;
+	} else if (p == SP1_DUI_LANES) {
+		lv[0] = lv[3] = SP1_ENGINE_LED_FULL;
+		lv[1] = lv[2] = SP1_ENGINE_LED_HALF;
 	}
 	if (p != SP1_DUI_SETTINGS) {
 		flash(lv);                       /* SETTINGS says so by breathing */
@@ -218,6 +248,7 @@ void sp1_dui_load_kit(int k)
 static void defaults(int k)
 {
 	acid_homes = 0;
+	memset(lane_len_was, -1, sizeof lane_len_was);
 	sp1_drums_patch_default(&pt, k);
 	pt.rest_choke = (uint8_t)(cfg.rest_choke ? 1 : 0);
 	pt.bass_mode = (uint8_t)cfg.bass_mode;
@@ -265,6 +296,7 @@ void sp1_dui_put(const struct sp1_drums_patch *p)
 	}
 	pt = *p;
 	acid_homes = 0;                   /* the preset's sound is home */
+	memset(lane_len_was, -1, sizeof lane_len_was);
 	acid_snap_pending = false;
 	pickup_all();
 }
@@ -338,7 +370,11 @@ uint32_t sp1_dui_tick(uint32_t elapsed_ms, const uint16_t raw[4], bool valid, bo
 				tap_count = 1;
 			}
 			since_tap_ms = 0u;
-			if (tap_count == 2 && page != SP1_DUI_SETTINGS) {
+			if (tap_count == 2 && page == SP1_DUI_SETTINGS && pt.bass_mode >= SP1_BASS_ACID) {
+				page = SP1_DUI_LANES;      /* two more taps from SETTINGS, with an acid pattern */
+				ev |= SP1_DUI_EV_PAGE;
+				page_glyph(page);
+			} else if (tap_count == 2 && page != SP1_DUI_SETTINGS && page != SP1_DUI_LANES) {
 				came_from = page;
 				page = SP1_DUI_SETTINGS;
 				ev |= SP1_DUI_EV_PAGE;
@@ -352,7 +388,10 @@ uint32_t sp1_dui_tick(uint32_t elapsed_ms, const uint16_t raw[4], bool valid, bo
 	}
 	/* a lone tap on SETTINGS, once nothing followed it: back where we came from */
 	if (!fnc && tap_count == 1 && since_tap_ms != 0xFFFFFFFFu && since_tap_ms > TAP_GAP_MS) {
-		if (page == SP1_DUI_SETTINGS) {
+		if (page == SP1_DUI_LANES) {
+			page = SP1_DUI_SETTINGS;   /* LANES leaves to SETTINGS, SETTINGS to where it was entered */
+			ev |= SP1_DUI_EV_PAGE;
+		} else if (page == SP1_DUI_SETTINGS) {
 			page = came_from;
 			ev |= SP1_DUI_EV_PAGE;
 			page_glyph(page);
@@ -624,7 +663,8 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 	const bool drum_page = !k->marbles && page >= SP1_DUI_DRUM1 && page <= SP1_DUI_DRUM4;
 	const int dn = drum_page ? (int)page - SP1_DUI_DRUM1 : -1;
 	const bool on_kit = !k->marbles && page == SP1_DUI_KIT;
-	const bool on_set = !k->marbles && page == SP1_DUI_SETTINGS;
+	/* LANES is SETTINGS' second face: the same buttons and rocker, other faders. */
+	const bool on_set = !k->marbles && (page == SP1_DUI_SETTINGS || page == SP1_DUI_LANES);
 	const bool ffwd_down = (k->held & BIT(SP1_BTN_FFWD)) != 0u;
 	const bool rwd_down = (k->held & BIT(SP1_BTN_RWD)) != 0u;
 	const bool ffwd_press = (k->pressed & BIT(SP1_BTN_FFWD)) != 0u;
@@ -685,17 +725,25 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 			if (pt.bass_mode >= SP1_BASS_ACID) {
 				/* An acid pattern brings its sound: SETTINGS + SHIFT becomes its cutoff,
 				 * resonance, decay and drive, and the faders catch up from there. The row
-				 * shows the pattern's number in binary, T1 the low bit, over a half-lit row. */
+				 * shows the pattern's number in base 3 (off 0, half 1, full 2), T1 the ones. */
 				const int i = pt.bass_mode - SP1_BASS_ACID;
 				const struct sp1_acid_preset *ap = sp1_acid_preset(i);
 				stored[L_SET_SH][0] = ap->p[0];        /* cutoff    */
 				stored[L_SET_SH][1] = ap->p[1];        /* resonance */
 				stored[L_SET_SH][2] = ap->p[3];        /* decay     */
 				stored[L_SET_SH][3] = ap->p[5];        /* drive     */
+				for (int l = 0; l < 4; l++) {          /* LANES: as written, at its own lengths */
+					stored[L_LANE][l] = 0.5f;
+					stored[L_LANE_SH][l] = ((float)sp1_acid_len_zone_of(ap->len[l]) + 0.5f) /
+							       (float)SP1_ACID_LEN_ZONES;
+					lane_len_was[l] = (int8_t)lane_len(l);
+				}
 				pickup_all();
 				uint8_t lv[4];
+				int num = i + 1;                       /* in base 3: off, half, full; T1 the ones */
 				for (int b = 0; b < 4; b++) {
-					lv[b] = ((i + 1) >> b) & 1 ? SP1_ENGINE_LED_FULL : SP1_ENGINE_LED_HALF;
+					lv[b] = num % 3 == 2 ? SP1_ENGINE_LED_FULL : (num % 3 == 1 ? SP1_ENGINE_LED_HALF : 0u);
+					num /= 3;
 				}
 				flash(lv);
 				LOG("BASS acid %d: %s (%s)\n", i + 1, ap->name, ap->chr ? "101" : "303");
@@ -740,9 +788,24 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 		sp1_drums_status(&st);
 		const int takes = st.acid_takes;
 		if (acid_homes == 0) {
-			memcpy(acid_home[0], stored[L_SET_SH], sizeof acid_home[0]);
+			acid_home_get(acid_home[0]);
 			acid_home_takes[0] = (uint8_t)takes;
 			acid_homes = 1;
+		}
+		/* a lane's length says what it became (there is no screen to read it from) */
+		for (int l = 0; l < 4; l++) {
+			const int8_t n = (int8_t)lane_len(l);
+			if (n != lane_len_was[l]) {
+				static const char *const ln[4] = { "gate", "accent", "slide", "octave" };
+				if (lane_len_was[l] >= 0) {
+					if (n) {
+						LOG("LANE %s: %d steps\n", ln[l], n);
+					} else {
+						LOG("LANE %s: the pattern's length\n", ln[l]);
+					}
+				}
+				lane_len_was[l] = n;
+			}
 		}
 		if (on_set && !fnc) {
 			if (ffwd_press) {
@@ -762,7 +825,7 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 						memmove(&acid_home_takes[0], &acid_home_takes[1], ACID_HOMES - 1);
 						acid_homes--;
 					}
-					memcpy(acid_home[acid_homes], stored[L_SET_SH], sizeof acid_home[0]);
+					acid_home_get(acid_home[acid_homes]);
 					acid_home_takes[acid_homes] = (uint8_t)takes;
 					acid_homes++;
 					const uint8_t lv[4] = { SP1_ENGINE_LED_FULL, SP1_ENGINE_LED_FULL,
@@ -810,8 +873,10 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 			acid_snap_pending = false;
 			int top = acid_homes - 1;
 			bool same = takes == acid_home_takes[top];
-			for (int i = 0; i < 4; i++) {
-				const float d = stored[L_SET_SH][i] - acid_home[top][i];
+			float cur[12];
+			acid_home_get(cur);
+			for (int i = 0; i < 12; i++) {
+				const float d = cur[i] - acid_home[top][i];
 				same = same && d > -0.004f && d < 0.004f;
 			}
 			const bool before = same && top > 0;
@@ -819,7 +884,10 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 				acid_homes--;
 				top--;
 			}
-			memcpy(stored[L_SET_SH], acid_home[top], sizeof acid_home[0]);
+			acid_home_put(acid_home[top]);
+			for (int l = 0; l < 4; l++) {
+				lane_len_was[l] = (int8_t)lane_len(l);
+			}
 			pickup_all();
 			acid_snap_to = acid_home_takes[top];
 			acid_snap_seq++;
@@ -1026,9 +1094,9 @@ void sp1_dui_ctl(struct sp1_drums_ctl *o)
 		o->acid_undo_seq = acid_undo_seq;
 		o->acid_snap_seq = acid_snap_seq;
 		o->acid_snap_to = acid_snap_to;
-		for (int l = 0; l < 4; l++) {
-			o->acid_dens[l] = cfg.acid_dens[l];
-			o->acid_len[l] = (uint8_t)cfg.acid_len[l];
+		for (int l = 0; l < 4; l++) {          /* LANES: density (centred = as written), length */
+			o->acid_dens[l] = detent(stored[L_LANE][l], DETENT_BIPOLAR);
+			o->acid_len[l] = lane_len(l);
 		}
 	}
 	o->n_deg = (uint8_t)(mrb.n_deg > 12 ? 12 : (mrb.n_deg < 0 ? 0 : mrb.n_deg));
@@ -1092,6 +1160,7 @@ const char *sp1_dui_page_name(enum sp1_dui_page p)
 	case SP1_DUI_DRUM3:    return "drum 3";
 	case SP1_DUI_DRUM4:    return "drum 4";
 	case SP1_DUI_SETTINGS: return "settings";
+	case SP1_DUI_LANES:    return "lanes";
 	default:               return "?";
 	}
 }

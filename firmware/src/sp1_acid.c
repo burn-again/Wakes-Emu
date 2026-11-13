@@ -11,49 +11,100 @@ static const struct sp1_acid_preset kPresets[SP1_ACID_PRESETS] = {
 	{ "acid-home",
 	  "C2! C2 C3~ C2 . D#2! C2 G2~ | C2! . A#2! G2~ C2 C2 F2! D#2~",
 	  0, { 0.32f, 0.75f, 0.60f, 0.30f, 0.70f, 0.15f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.50f, 0.50f, 1.0f },
-	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 126.0f },
+	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 126.0f, { 0, 0, 0, 0 } },
 	/* 2: slow and held. D mixolydian (the flat seventh under a major third), long ties, a
 	 * soft pulse with a little noise, and a decay long enough to trail off under each tie. */
 	{ "campfire",
 	  "D2 _ _ A2 _ C3~ B2 _ | G2 _ _ D3 _ A2~ F#2 _",
 	  1, { 0.38f, 0.35f, 0.35f, 0.75f, 0.30f, 0.10f, 0.55f, 0.35f, 0.50f, 0.08f, 0.0f, 0.70f, 0.55f, 1.0f },
-	  0.90f, { 0.42f, 0.0f, 0.0f, 0.0f }, 86.0f },
+	  0.90f, { 0.42f, 0.0f, 0.0f, 0.0f }, 86.0f, { 0, 0, 0, 0 } },
 	/* 3: A dorian (the raised sixth), rests that let the release ring, one octave lift. */
 	{ "sixth-form",
 	  "A1 . E2 _ G2~ F#2 _ . | A1^ _ E2~ D2 . C2 _ E2~",
 	  1, { 0.30f, 0.50f, 0.50f, 0.85f, 0.40f, 0.0f, 0.20f, 0.60f, 0.60f, 0.12f, 0.0f, 0.80f, 0.40f, 1.0f },
-	  0.80f, { 0.5f, 0.15f, 0.0f, 0.0f }, 92.0f },
+	  0.80f, { 0.5f, 0.15f, 0.0f, 0.0f }, 92.0f, { 0, 0, 0, 0 } },
 	/* 4: the octave lane doing the work: one note, every other step an octave up. */
 	{ "octave-hopper",
 	  "E1! E1^ E1 E1^ . E1! E1^ G1~ | G1 G1^ . A1! A1^ A1~ B1 D2^3~",
 	  0, { 0.40f, 0.70f, 0.55f, 0.20f, 0.80f, 0.25f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.50f, 0.50f, 1.0f },
-	  0.45f, { 0.5f, 0.0f, 0.0f, 0.0f }, 132.0f },
+	  0.45f, { 0.5f, 0.0f, 0.0f, 0.0f }, 132.0f, { 0, 0, 0, 0 } },
 	/* 5: nearly all slides and ties, with a long glide: the line never lets go. */
 	{ "rubber",
 	  "F1 _ G#1~ _ C2~ _ D#2~ F2~ | F1! . C2~ _ A#1~ _ G#1~ G1~",
 	  0, { 0.30f, 0.80f, 0.70f, 0.50f, 0.60f, 0.10f, 0.0f, 0.0f, 0.20f, 0.0f, 0.0f, 0.85f, 0.80f, 1.0f },
-	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 118.0f },
+	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 118.0f, { 0, 0, 0, 0 } },
 	/* 6: sparse and filthy: sub, filter FM and drive, with Chebyshev on the bus. */
 	{ "crawl",
 	  "C1! . . C1 . D#1~ _ . | C1! . . G1~ F1 . A#0! .",
 	  0, { 0.22f, 0.65f, 0.75f, 0.55f, 0.90f, 0.80f, 0.30f, 0.0f, 0.70f, 0.0f, 0.45f, 0.60f, 0.70f, 1.0f },
-	  0.60f, { 0.5f, 0.0f, 0.30f, 0.0f }, 100.0f },
+	  0.60f, { 0.5f, 0.0f, 0.30f, 0.0f }, 100.0f, { 0, 0, 0, 0 } },
 	/* 7: twelve steps, so it turns against a sixteen-step kit every three bars; a thin
 	 * pulse through the wavefolder. */
 	{ "fold-garden",
 	  "G1 _ D2 B1~ . E2 _ D2~ . A1 B1~ D2",
 	  1, { 0.45f, 0.45f, 0.40f, 0.60f, 0.30f, 0.20f, 0.70f, 0.50f, 0.30f, 0.0f, 0.0f, 0.50f, 0.50f, 1.0f },
-	  0.70f, { 0.5f, 0.35f, 0.15f, 0.0f }, 104.0f },
+	  0.70f, { 0.5f, 0.35f, 0.15f, 0.0f }, 104.0f, { 0, 0, 0, 0 } },
 	/* 8: accents in a row, which stack the cutoff, and marks with weights: the "!4" and
 	 * "^5~3" only sound with the accent, octave and slide lanes' densities turned up. */
 	{ "three-accents",
 	  "A1! A1! A1! . A1 C2~ A1 . | E2! E2! D2!~ . A1 A1!4 G1 A1^5~3",
 	  0, { 0.30f, 0.85f, 0.50f, 0.35f, 1.00f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.50f, 0.50f, 1.0f },
-	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 124.0f },
-	/* 9: the user's line from drums.cnfg, with the plain sound. */
+	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 124.0f, { 0, 0, 0, 0 } },
+	/* 9: jungle. A sub that holds, drops and slides under a fast kit; almost no filter. */
+	{ "jungle",
+	  "F1 _ _ . F1 _ G#1~ _ | . . F1 _ C2~ _ D#1~ _",
+	  1, { 0.25f, 0.30f, 0.30f, 0.60f, 0.50f, 0.30f, 0.30f, 0.30f, 0.80f, 0.0f, 0.0f, 0.75f, 0.70f, 1.0f },
+	  0.95f, { 0.5f, 0.0f, 0.15f, 0.0f }, 165.0f, { 0, 0, 0, 0 } },
+	/* 10: raga. Bhairav's notes (flat second and sixth, major third and seventh), every move
+	 * a slide, as a string is bent from one note to the next. */
+	{ "raga",
+	  "C2 _ C#2~ E2~ _ F2 E2~ C#2~ | C2 _ G2 G#2~ G2~ _ B1 C2~",
+	  1, { 0.40f, 0.50f, 0.40f, 0.70f, 0.40f, 0.05f, 0.35f, 0.50f, 0.30f, 0.05f, 0.0f, 0.90f, 0.60f, 1.0f },
+	  0.90f, { 0.5f, 0.0f, 0.0f, 0.0f }, 96.0f, { 0, 0, 0, 0 } },
+	/* 11: reggaeton. The bass on the dembow's 3 + 3 + 2. */
+	{ "reggaeton",
+	  "A1! . . A1 . . E2 . | A1! . . C2 . . E2~ D2",
+	  0, { 0.35f, 0.50f, 0.50f, 0.25f, 0.70f, 0.30f, 1.0f, 0.0f, 0.50f, 0.0f, 0.0f, 0.50f, 0.50f, 1.0f },
+	  0.60f, { 0.5f, 0.0f, 0.0f, 0.0f }, 92.0f, { 0, 0, 0, 0 } },
+	/* 12: cumbia. Root on the one, the fifth and the root again before the next: two bars,
+	 * the second a fourth up. */
+	{ "cumbia",
+	  "A1! . . . E2 . A1 . | D2! . . . A1 . D2 E2^4",
+	  1, { 0.42f, 0.40f, 0.45f, 0.35f, 0.50f, 0.10f, 0.20f, 0.40f, 0.40f, 0.0f, 0.0f, 0.50f, 0.30f, 1.0f },
+	  0.55f, { 0.5f, 0.0f, 0.0f, 0.0f }, 96.0f, { 0, 0, 0, 0 } },
+	/* 13: thrash. Sixteenths on the low E, short and driven, accents as the riff. */
+	{ "thrash",
+	  "E1! E1 E1 E1! E1 E1 G1! E1 | E1! E1 E1 A#1! A1 E1 F1! E1",
+	  0, { 0.45f, 0.40f, 0.45f, 0.15f, 0.90f, 0.90f, 0.0f, 0.0f, 0.30f, 0.0f, 0.20f, 0.30f, 0.30f, 1.0f },
+	  0.35f, { 0.5f, 0.20f, 0.40f, 0.0f }, 180.0f, { 0, 0, 0, 0 } },
+	/* 14: ambient. Thirty-two steps and one note-on: everything after it is a tie or a slow
+	 * slide, so the line is a single tone that drifts. */
+	{ "ambient",
+	  "C2 _ _ _ _ _ _ _ G2~ _ _ _ _ _ E2~ _ A1~ _ _ _ _ _ _ _ D2~ _ _ _ F2~ _ _ _",
+	  1, { 0.30f, 0.40f, 0.20f, 1.00f, 0.20f, 0.0f, 0.40f, 0.30f, 0.40f, 0.15f, 0.0f, 1.00f, 0.80f, 1.0f },
+	  1.00f, { 0.40f, 0.0f, 0.0f, 0.0f }, 60.0f, { 0, 0, 0, 0 } },
+	/* 15: markov. The line is one walk of a Markov chain over A minor pentatonic (a step up
+	 * or down 30 % each, stay 15 %, a leap 10 % each way, back to the root 5 %; a rest 15 %,
+	 * an accent 25 %, a slide 25 %, an octave 20 %; seed 303). Its gate, accent and octave
+	 * lanes loop every 12 steps under 16 pitches, so it comes round only every three bars. */
+	{ "markov",
+	  "A1! A1 C2 A1 C2 A1 C2 D2 | E2~ G2 A2 A2!^ A2!~ . G2! D2",
+	  0, { 0.34f, 0.70f, 0.55f, 0.30f, 0.70f, 0.15f, 0.50f, 0.0f, 0.0f, 0.0f, 0.0f, 0.50f, 0.50f, 1.0f },
+	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 110.0f, { 12, 12, 0, 12 } },
+	/* 16: electro-house. Off the beat, so the kick's duck pumps it; slides for the wobble. */
+	{ "electro-house",
+	  ". . G1! G1 . . G1! A#1~ | . . G1! G1 . . D2!~ F1~",
+	  1, { 0.40f, 0.55f, 0.50f, 0.25f, 0.60f, 0.50f, 0.50f, 0.20f, 0.50f, 0.0f, 0.0f, 0.60f, 0.20f, 1.0f },
+	  0.60f, { 0.5f, 0.20f, 0.0f, 0.0f }, 128.0f, { 0, 0, 0, 0 } },
+	/* 17: french-house. A disco octave line in F# minor; the filter is yours to sweep. */
+	{ "french-house",
+	  "F#1 F#2 . F#1 A1 . B1 C#2~ | F#1 F#2 . E2 . C#2 B1~ A1",
+	  1, { 0.45f, 0.50f, 0.35f, 0.30f, 0.50f, 0.15f, 0.10f, 0.30f, 0.30f, 0.0f, 0.0f, 0.50f, 0.30f, 1.0f },
+	  0.55f, { 0.5f, 0.0f, 0.0f, 0.0f }, 124.0f, { 0, 0, 0, 0 } },
+	/* 18: the user's line from drums.cnfg, with the plain sound. */
 	{ "user", NULL,
 	  0, { 0.32f, 0.75f, 0.60f, 0.30f, 0.70f, 0.15f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.50f, 0.50f, 1.0f },
-	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 126.0f },
+	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 126.0f, { 0, 0, 0, 0 } },
 };
 
 static struct sp1_acid_pattern pats[SP1_ACID_PRESETS];
@@ -206,6 +257,29 @@ int sp1_acid_format(const struct sp1_acid_pattern *p, char *buf, size_t size)
 #undef PUT
 	buf[at] = '\0';
 	return (int)at;
+}
+
+static const uint8_t kLenZone[SP1_ACID_LEN_ZONES] = { 2, 3, 4, 5, 6, 8, 12, 0 };
+
+uint8_t sp1_acid_len_zone(int zone)
+{
+	return kLenZone[zone < 0 ? 0 : (zone >= SP1_ACID_LEN_ZONES ? SP1_ACID_LEN_ZONES - 1 : zone)];
+}
+
+int sp1_acid_len_zone_of(uint8_t len)
+{
+	int best = SP1_ACID_LEN_ZONES - 1;                     /* 0, or longer than 12: its own */
+	if (len > 0 && len <= 12) {
+		int d = 99;
+		for (int z = 0; z < SP1_ACID_LEN_ZONES - 1; z++) {
+			const int e = len > kLenZone[z] ? len - kLenZone[z] : kLenZone[z] - len;
+			if (e < d) {
+				d = e;
+				best = z;
+			}
+		}
+	}
+	return best;
 }
 
 void sp1_acid_perf_default(struct sp1_acid_perf *f)

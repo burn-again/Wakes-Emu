@@ -104,7 +104,7 @@ static int nums(const char *s, const char *e, float *out, int max)
 static const char *const kLayerKey[SP1_DRUMS_LAYERS] = {
 	"kit_faders", "kit_shift", "drum1_faders", "drum1_shift", "drum2_faders", "drum2_shift",
 	"drum3_faders", "drum3_shift", "drum4_faders", "drum4_shift", "settings_faders",
-	"settings_shift",
+	"settings_shift", "lanes_faders", "lanes_shift",
 };
 static const char *const kBassName[3] = { "off", "y", "rests" };
 
@@ -164,6 +164,10 @@ void sp1_drums_patch_default(struct sp1_drums_patch *p, int kit)
 	p->v[11][1] = 0.0f;                              /* bass shape: saw               */
 	p->v[11][2] = 0.4f;                              /* bass cutoff                   */
 	p->v[11][3] = 0.4f;                              /* bass decay                    */
+	for (int i = 0; i < 4; i++) {
+		p->v[12][i] = 0.5f;                          /* the acid lanes' densities: as written */
+		p->v[13][i] = 1.0f;                          /* their lengths: the pattern's own      */
+	}
 	p->fx_on = 0x0Fu;
 	p->rest_choke = 1u;
 	p->bass_mode = 0u;
@@ -485,21 +489,13 @@ const char SP1_DRUMS_CNFG_TEMPLATE[] =
 "# The acid line plays in the bass's place when the bass mode is an acid pattern: step to\n"
 "# one with SETTINGS \"••\" + FFWD / RWD, or name it above (mode = acid-home). The patterns:\n"
 "# acid-home, campfire, sixth-form, octave-hopper, rubber, crawl, fold-garden,\n"
-"# three-accents, and user: the line below.\n"
-"# SETTINGS + SHIFT is then its cutoff, resonance, decay and drive.\n"
+"# three-accents, jungle, raga, reggaeton, cumbia, thrash, ambient, markov,\n"
+"# electro-house, french-house, and user: the line below.\n"
+"# SETTINGS + SHIFT is then its cutoff, resonance, decay and drive, and two more \"••\" taps\n"
+"# from SETTINGS open LANES: each lane's density, and with SHIFT its loop length.\n"
 "level = -12             ; dB in the mix, -40 .. 0\n"
 "duck = 0.5              ; octaves the kick dips its cutoff, 0 .. 3\n"
 "transpose = 0           ; semitones, -24 .. 24\n"
-"# Each lane's density (0.5 = as written; up brings in the marks with a weight, down thins)\n"
-"# and loop length in steps (0 = the pattern's own; shorter makes the lane drift).\n"
-"gate_density = 0.5\n"
-"accent_density = 0.5\n"
-"slide_density = 0.5\n"
-"octave_density = 0.5\n"
-"gate_length = 0\n"
-"accent_length = 0\n"
-"slide_length = 0\n"
-"octave_length = 0\n"
 "# Your own pattern, one token per 16th, up to 32: a note (C2, D#2, Bb1), . a rest,\n"
 "# _ a tie; after a note ! accent, ~ slide into it, ^ or v an octave up or down, each\n"
 "# with an optional weight 1-9 (C2!4), and /5 the note's own weight.\n"
@@ -525,10 +521,6 @@ void sp1_drums_cfg_defaults(struct sp1_drums_cfg *c)
 	c->acid_level_db = -12.0f;
 	c->acid_duck = 0.5f;
 	c->acid_transpose = 0.0f;
-	for (int l = 0; l < 4; l++) {
-		c->acid_dens[l] = 0.5f;
-		c->acid_len[l] = 0;
-	}
 }
 
 void sp1_drums_cfg_begin(struct sp1_drums_cfg_reader *r, struct sp1_drums_cfg *c,
@@ -615,7 +607,6 @@ static void cfg_line(struct sp1_drums_cfg_reader *r, const char *a, const char *
 	snprintf(key, sizeof key, "%.*s", (int)(kn < 23u ? kn : 23u), a);
 	float f;
 	if (strcmp(r->section, "[acid]") == 0) {
-		static const char *const kLane[4] = { "gate", "accent", "slide", "octave" };
 		if (key_is(a, kn, "level")) {
 			(void)cfg_num(r, key, v, b, -40.0f, 0.0f, &c->acid_level_db);
 		} else if (key_is(a, kn, "duck")) {
@@ -627,21 +618,6 @@ static void cfg_line(struct sp1_drums_cfg_reader *r, const char *a, const char *
 				bad_line(r, key, "not a pattern");
 			}
 		} else {
-			for (int l = 0; l < 4; l++) {
-				char nm[20];
-				snprintf(nm, sizeof nm, "%s_density", kLane[l]);
-				if (key_is(a, kn, nm)) {
-					(void)cfg_num(r, key, v, b, 0.0f, 1.0f, &c->acid_dens[l]);
-					return;
-				}
-				snprintf(nm, sizeof nm, "%s_length", kLane[l]);
-				if (key_is(a, kn, nm)) {
-					if (cfg_num(r, key, v, b, 0.0f, 32.0f, &f)) {
-						c->acid_len[l] = (int)f;
-					}
-					return;
-				}
-			}
 			bad_line(r, key, "unknown key");
 		}
 		return;

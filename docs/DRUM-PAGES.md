@@ -100,8 +100,9 @@ envelope, glide) that plays **notes from Marbles' scale**, chosen by Marbles' **
 
 A 303 / 101 voice (`third_party/tinykit/tinyacid`) playing a 16-step pattern **in the bass's
 place**. It is the bass mode after "only in the rests": **SETTINGS `••` + FFWD / RWD** steps
-on through the acid patterns (`BASS acid 1: acid-home (303)`), nine of them, and back round
-to off. The row shows the pattern's number in binary (T1 the low bit) over a half-lit row.
+on through the acid patterns (`BASS acid 1: acid-home (303)`), eighteen of them, and back
+round to off (RWD from off reaches the last ones first). The row shows the pattern's number
+in base 3 (off 0, half 1, full 2), T1 the ones; the log names it.
 
 | pattern | | |
 |---|---|---|
@@ -113,7 +114,16 @@ to off. The row shows the pattern's number in binary (T1 the low bit) over a hal
 | 6 **crawl** | 303 | sparse; sub, filter FM and drive |
 | 7 **fold-garden** | 101 | twelve steps, so it turns against the kit every three bars |
 | 8 **three-accents** | 303 | accents in a row (they stack the cutoff), marks with weights |
-| 9 **user** | 303 | `line =` in drums.cnfg's `[acid]` |
+| 9 **jungle** | 101 | a sub that holds, drops and slides; almost no filter |
+| 10 **raga** | 101 | Bhairav's notes, every move a slide |
+| 11 **reggaeton** | 303 square | the bass on the dembow's 3 + 3 + 2 |
+| 12 **cumbia** | 101 | root on the one, fifth and root before the next; the second bar a fourth up |
+| 13 **thrash** | 303 | sixteenths on the low E, short and driven, accents as the riff |
+| 14 **ambient** | 101 | 32 steps and one note-on: a single tone that drifts |
+| 15 **markov** | 303 | one walk of a Markov chain over A minor pentatonic; gate, accent and octave lanes loop every 12 steps under 16 pitches, so it comes round every three bars |
+| 16 **electro-house** | 101 | off the beat, so the kick's duck pumps it |
+| 17 **french-house** | 101 | a disco octave line in F# minor; the filter is yours to sweep |
+| 18 **user** | 303 | `line =` in drums.cnfg's `[acid]` |
 
 - A pattern brings its sound (character, waveform, envelope depth, accent, slide time ...).
   **SETTINGS + SHIFT** is then **F1 cutoff · F2 resonance · F3 decay · F4 drive**, set to the
@@ -123,8 +133,32 @@ to off. The row shows the pattern's number in binary (T1 the low bit) over a hal
 - **The kick ducks its cutoff**: each hit on slot 1 dips it (`duck` in drums.cnfg, half an
   octave) and it comes back over about a tenth of a second.
 - The pattern is kept in the PRST slot by name (`bass = campfire`).
-- Not yet: pages for the lanes' densities and lengths (drums.cnfg has them), rests from the
-  rocker.
+- Not yet: rests from the rocker.
+
+### LANES: each lane's density and loop length
+
+**Two more `••` taps from SETTINGS**, while an acid pattern is the bass mode, open **LANES**
+(`PAGE lanes`; the row flashes full · half · half · full). One tap goes back to SETTINGS.
+
+| | F1 | F2 | F3 | F4 |
+|---|---|---|---|---|
+| **LANES** | **gate** density | **accent** density | **slide** density | **octave** density |
+| **LANES + SHIFT** | gate length | accent length | slide length | octave length |
+
+- **Density** has a centre detent: centred is the pattern as written (weights 5 and up). Up
+  brings in the marks written with a weight (`C2!4`); down thins the lane, to nothing at the
+  bottom: gate down mutes notes, slide down turns bends into plucked notes, accent down
+  flattens the line.
+- **Length** is eight zones: **2, 3, 4, 5, 6, 8, 12** steps, and at the top **the pattern's
+  own**. A shorter lane loops its first steps under all the notes, so it drifts against them:
+  an accent lane 3 long over 16 notes moves the accents every beat. The log says what a lane
+  became (`LANE accent: 3 steps`).
+- A pattern sets the page when you step to it: densities centred, lengths its own (markov
+  starts with three lanes at 12).
+- The buttons and the rocker are SETTINGS': mutes on T1-T4, keep / undo / add / snap back
+  on the rocker. **Snap back and add cover this page too**: home is the four sound faders,
+  the eight lane faders and the takes.
+- The page's faders are kept in the PRST slot (`lanes_faders`, `lanes_shift`).
 
 ### Fader moves: keep, undo, add, snap back
 
@@ -158,6 +192,10 @@ What it is for (`drumtest` renders each as `jam*.wav`):
    line breathes the same way every bar while you work on the drums.
 4. **Build and drop** — keep a closing-filter bar, push drive and resonance up by hand for
    four bars, then hold RWD: on the bar line everything is home again at once.
+
+And one per genre pattern (`genre_*.wav`, ten bars each over a kit that suits it): two bars
+as written, a fader move played in bar 3 and kept, three bars of it looping, one lane changed
+in bars 7-8, and a snap back at bar 9. `drumtest` prints what each one does.
 
 **A pattern as text** — one token per 16th, up to 32:
 

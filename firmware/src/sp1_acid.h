@@ -93,7 +93,7 @@ struct sp1_acid_event sp1_acid_seq_step(struct sp1_acid_seq *q, const struct sp1
 					const struct sp1_acid_perf *f, int32_t g16);
 
 /* ---- the built-in patterns, each with its sound ---- */
-#define SP1_ACID_BUILTIN 8
+#define SP1_ACID_BUILTIN 17
 #define SP1_ACID_PRESETS (SP1_ACID_BUILTIN + 1)     /* the last is the user's (drums.cnfg) */
 #define SP1_ACID_NPARAM 14                           /* tinyacid's TA_NPARAM                */
 struct sp1_acid_preset {
@@ -106,7 +106,13 @@ struct sp1_acid_preset {
 	                              /* Chebyshev, FM. The firmware leaves the FX faders     */
 	                              /* alone; the host renders use it.                      */
 	float bpm;                    /* the tempo it was written at (the host renders)      */
+	uint8_t len[SP1_ACID_LANES];  /* the lanes' loops it starts with, 0 = the pattern's  */
 };
+/* The lanes' loop lengths a fader can choose (the LANES page, SHIFT): eight zones, the top
+ * one the pattern's own length. */
+#define SP1_ACID_LEN_ZONES 8
+uint8_t sp1_acid_len_zone(int zone);            /* 2 3 4 5 6 8 12, then 0 = the pattern's */
+int     sp1_acid_len_zone_of(uint8_t len);      /* the zone nearest a length              */
 const struct sp1_acid_preset *sp1_acid_preset(int i);          /* 0 .. SP1_ACID_PRESETS-1 */
 const struct sp1_acid_pattern *sp1_acid_pattern_of(int i);     /* its parsed pattern       */
 /* drums.cnfg's [acid] line: the user pattern. Returns as sp1_acid_parse. */

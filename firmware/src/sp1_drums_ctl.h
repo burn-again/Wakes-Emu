@@ -110,6 +110,6 @@ enum sp1_drums_xdest {
 
 /* SP1_BASS_ACID + i plays acid pattern i (sp1_acid.h) on the acid voice; the bass is silent. */
 enum sp1_drums_bass { SP1_BASS_OFF = 0, SP1_BASS_Y, SP1_BASS_RESTS, SP1_BASS_ACID };
-#define SP1_BASS_MODES (SP1_BASS_ACID + 9)        /* + SP1_ACID_PRESETS */
+#define SP1_BASS_MODES (SP1_BASS_ACID + 18)       /* + SP1_ACID_PRESETS */
 
 #endif

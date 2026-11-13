@@ -299,7 +299,7 @@ int main(int argc, char** argv) {
       p.drums.acid_chr = ap->chr;
       for (int k = 0; k < SP1_ACID_NPARAM; ++k) p.drums.acid_p[k] = ap->p[k];
       p.drums.acid_gate = ap->gate; p.drums.acid_level = 0.6f; p.drums.acid_duck = 0.0f; p.drums.acid_transpose = 0.0f;
-      for (int l = 0; l < 4; ++l) { p.drums.acid_dens[l] = 0.5f; p.drums.acid_len[l] = 0; }
+      for (int l = 0; l < 4; ++l) { p.drums.acid_dens[l] = 0.5f; p.drums.acid_len[l] = ap->len[l]; }
     };
     // acid-home: 16 steps, rests on steps 5 and 10, no ties -> 14 notes a bar
     fresh(p, 0, 0x0); acid(0);
@@ -368,11 +368,12 @@ int main(int argc, char** argv) {
     }
     // ---- for the ears: each pattern over a kick and a hat at its own tempo. `script` is the
     // hands: called every block with the position in bars, it moves the controls. ----
+    int r_kit = 4; uint8_t r_solo = 0x5; float r_duck = 0.5f;
     auto render = [&](const char* name, int i, int bars, void (*script)(float, sp1_drums_ctl&), int want_takes) {
       const struct sp1_acid_preset* ap = sp1_acid_preset(i);
       sp1_drums_init();
-      fresh(p, 4, 0x5);                                   // dub techno: its kick and its tambourine
-      acid(i); p.drums.acid_duck = 0.5f;
+      fresh(p, r_kit, r_solo);                            // by default dub techno's kick and tambourine
+      acid(i); p.drums.acid_duck = r_duck;
       p.drums.fx_on = 0x0F; for (int k = 0; k < 4; ++k) p.drums.fx[k] = ap->fx[k];
       p.drums.fm_hz = 196.0f;
       const unsigned per_beat = (unsigned)(48000.0f * 60.0f / ap->bpm / 24.0f + 0.5f);   // blocks
@@ -402,7 +403,7 @@ int main(int argc, char** argv) {
       wav(path, pcm, blocks * 24);
     };
     // The patterns as written for four bars, then the cutoff up a little and every lane at 1.
-    for (int i = 0; i < SP1_ACID_BUILTIN; ++i) {
+    for (int i = 0; i < 8; ++i) {
       char name[64]; snprintf(name, sizeof name, "acid%d_%s", i + 1, sp1_acid_preset(i)->name);
       static float base; base = sp1_acid_preset(i)->p[0];
       render(name, i, 8, [](float bar, sp1_drums_ctl& d) {
@@ -456,17 +457,59 @@ int main(int argc, char** argv) {
       }
       ONCE(8.0f, { d.acid_p[0] = 0.22f; d.acid_p[1] = 0.65f; d.acid_p[5] = 0.80f; d.acid_snap_to = 0; d.acid_snap_seq++; });   // the drop
     }, 0);
+    // ---- nine more, by genre, each with its kit, a fader move kept as a take, then a lane ----
+    // Ten bars: two as written; bar 3 the hand plays `shape` on one fader; keep at the bar line
+    // and three bars loop hands-off; bars 7-8 one lane changes (its density or its loop length,
+    // as the LANES page would); snap back at bar 9: the fader, the take and the lane are home.
+    struct Genre { int i, kit; uint8_t solo; float duck; int param, shape; float lo, hi; int lane; float dens; int len; const char* does; };
+    static const Genre kGenres[] = {
+      {  8, 1, 0xF, 0.3f, 0, 2, 0.20f, 0.50f, 0, -1.0f,  6, "cutoff wobble kept; then the gate lane 6 steps long: the sub's rhythm turns against the break" },
+      {  9, 2, 0x5, 0.3f, 0, 2, 0.30f, 0.62f, 2,  0.0f, -1, "a breath on the cutoff kept; then slide density 0: the bends become plucked notes" },
+      { 10, 0, 0x7, 0.6f, 0, 3, 0.20f, 0.62f, 0, -1.0f,  6, "filter stabs on the off-beats kept; then the gate lane 6 steps long: the 3 + 3 keeps rolling over the bar" },
+      { 11, 2, 0x5, 0.4f, 1, 4, 0.40f, 0.85f, 3,  1.0f, -1, "resonance flicked on the 8ths kept; then octave density up: the weighted octave jump comes in" },
+      { 12, 0, 0x5, 0.2f, 0, 0, 0.30f, 0.70f, 1, -1.0f,  3, "a rising cutoff kept, so every bar opens; then the accent lane 3 steps long: the riff's accents shift each beat" },
+      { 13, 7, 0x1, 0.0f, 0, 2, 0.20f, 0.52f, 0, -1.0f, 12, "one slow swell kept (a bar is four seconds here); then the gate lane 12 steps long" },
+      { 14, 3, 0x5, 0.4f, 1, 4, 0.55f, 0.95f, 2, -1.0f,  5, "resonance flicks kept; then the slide lane 5 steps long, on top of its 12-step lanes" },
+      { 15, 0, 0x5, 1.5f, 0, 1, 0.30f, 0.72f, 1,  0.0f, -1, "a closing filter kept, with the kick ducking hard; then accent density 0: the line goes flat and even" },
+      { 16, 4, 0x5, 1.0f, 0, 2, 0.15f, 0.78f, 0, -1.0f,  8, "the filter sweep kept; then the gate lane 8 steps long: the first half-bar's rhythm under all the notes" },
+    };
+    static const Genre* G; static float g_rest; static float g_home[4];
+    for (const Genre& g : kGenres) {
+      G = &g;
+      const struct sp1_acid_preset* ap = sp1_acid_preset(g.i);
+      g_rest = ap->p[g.param];
+      g_home[0] = ap->len[0]; g_home[1] = ap->len[1]; g_home[2] = ap->len[2]; g_home[3] = ap->len[3];
+      r_kit = g.kit; r_solo = g.solo; r_duck = g.duck;
+      char name[64]; snprintf(name, sizeof name, "genre_%s", ap->name);
+      render(name, g.i, 10, [](float bar, sp1_drums_ctl& d) {
+        const float in = bar - floorf(bar);
+        if (bar >= 2.0f && bar < 3.0f) {
+          float u = 0.0f;                                                      // 0..1: where the fader is between lo and hi
+          switch (G->shape) {
+            case 0: u = in; break;                                             // a ramp up
+            case 1: u = 1.0f - in; break;                                      // a ramp down
+            case 2: u = sinf(3.14159265f * in); break;                         // up and back
+            case 3: u = ((int)(in * 16.0f) % 4 == 2) ? 1.0f : 0.0f; break;     // open on the off-beat 16ths
+            default: u = ((int)(in * 8.0f) & 1) ? 1.0f : 0.0f; break;          // flicked on the off 8ths
+          }
+          d.acid_p[G->param] = G->lo + (G->hi - G->lo) * u;
+        }
+        ONCE(3.0f, { d.acid_p[G->param] = g_rest; d.acid_keep_seq++; });
+        ONCE(6.0f, { if (G->dens >= 0.0f) d.acid_dens[G->lane] = G->dens; if (G->len >= 0) d.acid_len[G->lane] = (uint8_t)G->len; });
+        ONCE(8.0f, { d.acid_dens[G->lane] = 0.5f; d.acid_len[G->lane] = (uint8_t)g_home[G->lane]; d.acid_snap_to = 0; d.acid_snap_seq++; });
+      }, 0);
+      printf("     %s: %s\n", ap->name, g.does);
+    }
     #undef ONCE
     // ---- the preset's word and drums.cnfg's [acid] ----
     { struct sp1_drums_cfg c; struct sp1_drums_cfg_reader r;
-      const char* t = "[bass]\nmode = crawl\n[acid]\nlevel = -9\nduck = 1.5\ntranspose = -12\nslide_density = 1\n"
-                      "accent_length = 12\noctave_length = 40\nline = E1 . E2~ _\nline = E1 nope\nwhat = 1\n";
+      const char* t = "[bass]\nmode = crawl\n[acid]\nlevel = -9\nduck = 1.5\ntranspose = -12\n"
+                      "line = E1 . E2~ _\nline = E1 nope\nwhat = 1\n[bass]\nmode = french-house\n";
       sp1_drums_cfg_begin(&r, &c, nullptr, nullptr); sp1_drums_cfg_feed(&r, t, strlen(t));
       const int bad = sp1_drums_cfg_end(&r);
-      snprintf(what, sizeof what, "drums.cnfg [acid]: %d bad lines (want 3), the good ones read, the user line is the first", bad);
-      check(bad == 3 && c.bass_mode == SP1_BASS_ACID + 5 && c.acid_level_db == -9.0f && c.acid_duck == 1.5f &&
-            c.acid_transpose == -12.0f && c.acid_dens[2] == 1.0f && c.acid_len[1] == 12 && c.acid_len[3] == 0 &&
-            sp1_acid_pattern_of(SP1_ACID_BUILTIN)->n == 4, what);
+      snprintf(what, sizeof what, "drums.cnfg [acid]: %d bad lines (want 2), the good ones read, the user line is the first", bad);
+      check(bad == 2 && c.bass_mode == SP1_BASS_ACID + 16 && c.acid_level_db == -9.0f && c.acid_duck == 1.5f &&
+            c.acid_transpose == -12.0f && sp1_acid_pattern_of(SP1_ACID_BUILTIN)->n == 4, what);
       check(strcmp(sp1_drums_bass_name(SP1_BASS_ACID + 1), "campfire") == 0 && strcmp(sp1_drums_bass_name(2), "rests") == 0 &&
             strcmp(sp1_drums_bass_name(200), "off") == 0, "a bass mode's word: rests, campfire, and off for nonsense");
     }
