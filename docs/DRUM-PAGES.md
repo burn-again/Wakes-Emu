@@ -430,6 +430,24 @@ Every action names itself on the console: `PAGE drum 2`, `KIT 3: modal gamelan`,
 slot 3 10, slot 4 0 (of 16)` whenever the rests change, and `HIT drums 0x2 (1)` for hits while
 stopped.
 
+## Building it
+
+The drum firmware is the Plaits image with one more option; everything else is `docs/BUILD.md`:
+
+```sh
+west build -p always -b stem_player wakes-sp1/firmware -d build-drums \
+    -- -DBOARD_ROOT="$PWD/wakes-sp1" -DCONFIG_SP1_PLAITS=y -DCONFIG_SP1_DRUMS=y
+python wakes-sp1/tools/ci/check_image.py build-drums
+```
+
+Built that way with the pinned Zephyr v4.3.1 and SDK 0.17.4 (2026-11-13, this branch): no
+warnings, every `check_image.py` check passes, and the image is **608,568 B** (66.6 % of the
+slot) with **167,496 B** of RAM (63.9 %). The acid line is 19.6 KB of that flash and 12.4 KB
+of that RAM (the drum firmware before it: 588,944 B and 155,080 B). With `CONFIG_SP1_DRUMS`
+off, the image is the base's byte for byte apart from the build time (compared at the same
+source and build paths; the build directory's name moves 8 bytes of padding otherwise).
+CI does not build this configuration, and it has not run on an SP-1.
+
 ## CPU
 
 On the M4 harness, compiled with the firmware's own flags (instructions per sample, averaged
