@@ -14,6 +14,7 @@
 #include "sp1_drums.h"
 #include "sp1_drums_ui.h"
 #include "sp1_drums_patch.h"
+#include "sp1_acid.h"
 
 // The kit's step-through talks to Marbles' clock (sp1_marbles.h); there is no Marbles here.
 extern "C" void sp1_marbles_clock(const float*, int) {}
@@ -285,6 +286,103 @@ int main(int argc, char** argv) {
     snprintf(what, sizeof what, "drums.cnfg: edited -- %d bad lines, the good ones read", bad2);
     check(bad2 == 4 && c.kit == 2 && c.tape_release == 0.0f && c.rotate_q == 2 && c.rest_choke == 0 &&
           c.bass_mode == 1 && c.bass_level_db == -6.0f && c.tape_floor == d.tape_floor && c.bass_octaves == 2, what);
+  }
+
+  // ---- the acid line ----
+  {
+    sp1_synth_params p;
+    char what[200];
+    // The controls as the SETTINGS page would send them for pattern i.
+    auto acid = [&p](int i) {
+      const struct sp1_acid_preset* ap = sp1_acid_preset(i);
+      p.drums.bass_mode = (uint8_t)(SP1_BASS_ACID + i);
+      p.drums.acid_chr = ap->chr;
+      for (int k = 0; k < SP1_ACID_NPARAM; ++k) p.drums.acid_p[k] = ap->p[k];
+      p.drums.acid_gate = ap->gate; p.drums.acid_level = 0.6f; p.drums.acid_duck = 0.0f; p.drums.acid_transpose = 0.0f;
+      for (int l = 0; l < 4; ++l) { p.drums.acid_dens[l] = 0.5f; p.drums.acid_len[l] = 0; }
+    };
+    // acid-home: 16 steps, rests on steps 5 and 10, no ties -> 14 notes a bar
+    fresh(p, 0, 0x0); acid(0);
+    { Clock c(5u); run(c, p, kBar); uint32_t b0 = st().bass_notes; run(c, p, 2 * kBar); uint32_t n = st().bass_notes - b0;
+      snprintf(what, sizeof what, "acid-home with the kit muted: 2 bars play %u notes (want 28)", n); check(n == 28, what);
+      double sq = 0; for (int i = 0; i < kBar; ++i) { sp1_drums_frame f = c.next(); sp1_drums_begin(&p); sp1_drums_render(&f, out, 24);
+        for (int k = 0; k < 24; ++k) sq += (double)out[k] * out[k]; }
+      const double db = 20 * log10(sqrt(sq / (kBar * 24.0)) / 32768.0 + 1e-12);
+      snprintf(what, sizeof what, "it is heard: %.1f dBFS rms over a bar", db); check(db > -40.0 && db < -6.0, what);
+      p.drums.acid_dens[0] = 0.0f; run(c, p, kBar); b0 = st().bass_notes; run(c, p, 2 * kBar); n = st().bass_notes - b0;
+      snprintf(what, sizeof what, "gate density 0: %u notes (want 0)", n); check(n == 0, what);
+      // campfire: 8 notes and 8 ties a bar
+      acid(1); run(c, p, kBar); b0 = st().bass_notes; run(c, p, 2 * kBar); n = st().bass_notes - b0;
+      snprintf(what, sizeof what, "campfire: 2 bars play %u notes, the ties none (want 16)", n); check(n == 16, what);
+      // fold-garden: 12 steps, 8 notes a loop -> 4 bars (64 steps) hold 5 loops and 4 steps (3 notes): 43
+      acid(6); c = Clock(5u); c.running = false; run(c, p, 8); c.running = true; b0 = st().bass_notes; run(c, p, 4 * kBar);
+      n = st().bass_notes - b0;
+      snprintf(what, sizeof what, "fold-garden, 12 steps against the bar: 4 bars play %u notes (want 43)", n); check(n == 43, what);
+      // the bass's own modes leave the acid voice alone, and the other way round
+      p.drums.bass_mode = SP1_BASS_OFF; run(c, p, kBar); b0 = st().bass_notes; run(c, p, kBar);
+      check(st().bass_notes == b0, "bass off again: the acid line stops");
+    }
+    // the kick's duck reaches the voice: the same bar with and without it differs
+    { double diff = 0; static float ref[16 * 64 * 24];
+      for (int pass = 0; pass < 2; ++pass) {
+        sp1_drums_init(); fresh(p, 0, 0x1); acid(0); p.drums.acid_duck = pass ? 2.0f : 0.0f;
+        Clock c(5u);
+        for (int i = 0; i < kBar; ++i) { sp1_drums_frame f = c.next(); sp1_drums_begin(&p); sp1_drums_render(&f, out, 24);
+          for (int k = 0; k < 24; ++k) { if (pass) diff += fabs(out[k] - ref[i * 24 + k]); else ref[i * 24 + k] = out[k]; } }
+      }
+      snprintf(what, sizeof what, "the kick ducks the cutoff: the bar differs by %.0f in all", diff); check(diff > 1000.0, what);
+    }
+    // ---- every pattern over kick and hat, at its own tempo, for the ears: 8 bars each, the
+    // second four with the cutoff up a little and every lane's density at 1 ----
+    for (int i = 0; i < SP1_ACID_BUILTIN; ++i) {
+      const struct sp1_acid_preset* ap = sp1_acid_preset(i);
+      sp1_drums_init();
+      fresh(p, 4, 0x5);                                   // dub techno: its kick and its tambourine
+      acid(i); p.drums.acid_duck = 0.5f;
+      p.drums.fx_on = 0x0F; for (int k = 0; k < 4; ++k) p.drums.fx[k] = ap->fx[k];
+      p.drums.fm_hz = 196.0f;
+      const unsigned per_beat = (unsigned)(48000.0f * 60.0f / ap->bpm / 24.0f + 0.5f);   // blocks
+      const unsigned blocks = per_beat * 32u;
+      static int16_t pcm[48000 * 24];
+      int peak = 0, clipped = 0, nans = 0; double sumsq = 0; uint8_t prev = 0;
+      const uint32_t n0 = st().bass_notes;
+      float volts[4] = {0, 0, 0, 0};
+      for (unsigned b = 0; b < blocks && (b + 1) * 24 <= sizeof pcm / 2; ++b) {
+        if (b == blocks / 2) {
+          p.drums.acid_p[0] += 0.12f;
+          for (int l = 0; l < 4; ++l) p.drums.acid_dens[l] = 1.0f;
+        }
+        const unsigned phase = b % per_beat;
+        const uint8_t gates = phase < per_beat / 4 ? 3u : 0u;
+        sp1_drums_frame f; f.rise = gates & (uint8_t)~prev; prev = gates; f.volts = volts;
+        f.ramp = (float)phase / (float)per_beat; f.running = true; f.audition = false;
+        sp1_drums_begin(&p); sp1_drums_render(&f, out, 24);
+        for (unsigned k = 0; k < 24; ++k) {
+          if (!isfinite(out[k])) { ++nans; out[k] = 0; }
+          int v = (int)out[k]; if (v > 32767) { v = 32767; ++clipped; } if (v < -32768) { v = -32768; ++clipped; }
+          pcm[b * 24 + k] = (int16_t)v; sumsq += (double)v * v; if (abs(v) > peak) peak = abs(v);
+        }
+      }
+      snprintf(what, sizeof what, "acid %d %-14s %3.0f bpm  %3u notes  peak %5d  rms %6.1f dBFS  clipped %d  nan %d", i + 1,
+               ap->name, ap->bpm, st().bass_notes - n0, peak, 20 * log10(sqrt(sumsq / (blocks * 24.0)) / 32768.0 + 1e-12),
+               clipped, nans);
+      check(nans == 0 && clipped == 0 && peak > 3000 && st().bass_notes - n0 > 20, what);
+      char path[256]; snprintf(path, sizeof path, "%s/acid%d_%s.wav", dir, i + 1, ap->name);
+      wav(path, pcm, blocks * 24);
+    }
+    // ---- the preset's word and drums.cnfg's [acid] ----
+    { struct sp1_drums_cfg c; struct sp1_drums_cfg_reader r;
+      const char* t = "[bass]\nmode = crawl\n[acid]\nlevel = -9\nduck = 1.5\ntranspose = -12\nslide_density = 1\n"
+                      "accent_length = 12\noctave_length = 40\nline = E1 . E2~ _\nline = E1 nope\nwhat = 1\n";
+      sp1_drums_cfg_begin(&r, &c, nullptr, nullptr); sp1_drums_cfg_feed(&r, t, strlen(t));
+      const int bad = sp1_drums_cfg_end(&r);
+      snprintf(what, sizeof what, "drums.cnfg [acid]: %d bad lines (want 3), the good ones read, the user line is the first", bad);
+      check(bad == 3 && c.bass_mode == SP1_BASS_ACID + 5 && c.acid_level_db == -9.0f && c.acid_duck == 1.5f &&
+            c.acid_transpose == -12.0f && c.acid_dens[2] == 1.0f && c.acid_len[1] == 12 && c.acid_len[3] == 0 &&
+            sp1_acid_pattern_of(SP1_ACID_BUILTIN)->n == 4, what);
+      check(strcmp(sp1_drums_bass_name(SP1_BASS_ACID + 1), "campfire") == 0 && strcmp(sp1_drums_bass_name(2), "rests") == 0 &&
+            strcmp(sp1_drums_bass_name(200), "off") == 0, "a bass mode's word: rests, campfire, and off for nonsense");
+    }
   }
 
   printf(failures ? "%d check(s) FAILED\n" : "all checks ok\n", failures);

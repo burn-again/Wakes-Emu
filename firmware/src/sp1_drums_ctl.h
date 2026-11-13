@@ -70,6 +70,16 @@ struct sp1_drums_ctl {
 	uint8_t n_deg;                /* the scale: degrees in semitones above the root        */
 	float degrees[12];
 	float period;                 /* its period (12 for an octave)                         */
+
+	/* ---- the acid line (bass_mode >= SP1_BASS_ACID): tinyacid in the bass's place ---- */
+	uint8_t acid_chr;             /* tinyacid's character: 0 the 303, 1 the 101            */
+	float acid_p[14];             /* tinyacid's parameters, in its order                   */
+	float acid_level;             /* linear gain                                           */
+	float acid_gate;              /* how far into its step a note's gate falls, 0..1       */
+	float acid_duck;              /* octaves the cutoff dips on each hit of slot 1         */
+	float acid_dens[4];           /* the lanes' densities: gate, accent, slide, octave     */
+	uint8_t acid_len[4];          /* the lanes' loops, 0 = the pattern's                   */
+	float acid_transpose;         /* semitones                                             */
 };
 
 /* Where a t output (or the Y clock) goes. */
@@ -92,6 +102,8 @@ enum sp1_drums_xdest {
 	SP1_DX_COUNT
 };
 
-enum sp1_drums_bass { SP1_BASS_OFF = 0, SP1_BASS_Y, SP1_BASS_RESTS, SP1_BASS_MODES };
+/* SP1_BASS_ACID + i plays acid pattern i (sp1_acid.h) on the acid voice; the bass is silent. */
+enum sp1_drums_bass { SP1_BASS_OFF = 0, SP1_BASS_Y, SP1_BASS_RESTS, SP1_BASS_ACID };
+#define SP1_BASS_MODES (SP1_BASS_ACID + 9)        /* + SP1_ACID_PRESETS */
 
 #endif

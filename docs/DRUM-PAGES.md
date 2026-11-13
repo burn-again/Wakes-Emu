@@ -96,6 +96,54 @@ envelope, glide) that plays **notes from Marbles' scale**, chosen by Marbles' **
   sub level and the bass level in the mix are in `drums.cnfg`.
 - A t output cabled to **bass** strikes it too, in any mode except off.
 
+## The acid line
+
+A 303 / 101 voice (`third_party/tinykit/tinyacid`) playing a 16-step pattern **in the bass's
+place**. It is the bass mode after "only in the rests": **SETTINGS `••` + FFWD / RWD** steps
+on through the acid patterns (`BASS acid 1: acid-home (303)`), nine of them, and back round
+to off. The row shows the pattern's number in binary (T1 the low bit) over a half-lit row.
+
+| pattern | | |
+|---|---|---|
+| 1 **acid-home** | 303 | C minor, accents on the ones, two slides up |
+| 2 **campfire** | 101 | slow D mixolydian, long ties, a soft pulse with a little noise |
+| 3 **sixth-form** | 101 | A dorian, rests that let the release ring, one octave lift |
+| 4 **octave-hopper** | 303 square | one note, every other step an octave up |
+| 5 **rubber** | 303 | nearly all slides and ties, a long glide |
+| 6 **crawl** | 303 | sparse; sub, filter FM and drive |
+| 7 **fold-garden** | 101 | twelve steps, so it turns against the kit every three bars |
+| 8 **three-accents** | 303 | accents in a row (they stack the cutoff), marks with weights |
+| 9 **user** | 303 | `line =` in drums.cnfg's `[acid]` |
+
+- A pattern brings its sound (character, waveform, envelope depth, accent, slide time ...).
+  **SETTINGS + SHIFT** is then **F1 cutoff · F2 resonance · F3 decay · F4 drive**, set to the
+  pattern's own values when you step to it (the faders catch up from there). Stepping back
+  to the bass restores the bass's four.
+- It runs on the sequencer's 16ths, with the swing, and through the bus FX with the kit.
+- **The kick ducks its cutoff**: each hit on slot 1 dips it (`duck` in drums.cnfg, half an
+  octave) and it comes back over about a tenth of a second.
+- The pattern is kept in the PRST slot by name (`bass = campfire`).
+- Not yet: pages for the lanes' densities and lengths (drums.cnfg has them), snap back,
+  recorded fader moves, rests from the rocker.
+
+**A pattern as text** — one token per 16th, up to 32:
+
+| | |
+|---|---|
+| `C2` `D#2` `Bb1` | a note (C2 = MIDI 36) |
+| `.` | a rest |
+| `_` | a tie: the note before holds through this step |
+| `!` | after a note: accent |
+| `~` | after a note: slide **into** it (no retrigger, the pitch glides) |
+| `^` `v` | after a note: an octave up / down |
+| `/5` | after a note: the note's own weight |
+
+A mark may carry a weight 1-9, as the drums' maps do: `C2!4` is an accent that only sounds
+with the accent lane's density up. Gate, accent, slide and octave are **four lanes** over
+the same steps, each with a density (0.5 = as written with weights 5 and up) and a loop
+length (0 = the pattern's; shorter and the lane drifts against the notes). Each step is
+decided once, a step ahead, so a slide always has a held note behind it.
+
 ## Cables (MARBLES)
 
 On MARBLES, **`••` + T1–T4** (on release) patches one of Marbles' outputs. Each press steps that
@@ -325,6 +373,27 @@ In the emulator's calibrated model (good to about ±7 points; Wakes' Plaits engi
 |---|---|---|
 | normal | 32–39 % | 58–86 % |
 | Marbles' RATE high, or ×4 | 62–71 % | 77–89 % |
+
+**The acid line**, in the same model at the default tempo with kit 1 (`node
+tools/host-tests/drums-emu/acid-cpu.mjs`; the whole audio thread, 4 s each). The drums and
+tinyacid are not among the engines the model was fitted to, so read these as ±7 points at best:
+
+| playing | average | heaviest block |
+|---|---|---|
+| four drums, bass off | 29.6 % | 51.3 % |
+| kick + hat | 27.7 % | 42.8 % |
+| kick + hat + the old bass on the Y clock | 28.5 % | 52.4 % |
+| kick + hat + acid-home (303) | 42.8 % | 66.5 % |
+| kick + hat + campfire (101: pulse, sub, noise) | 53.3 % | 68.8 % |
+| kick + hat + crawl (303: sub, filter FM, drive) | 40.3 % | 73.5 % |
+| four drums + crawl | 42.2 % | 81.5 % |
+| four drums + crawl + all four bus FX | 60.0 % | 99.2 % |
+
+So the line costs about 15 points over a kick and a hat as a 303 and about 25 as the 101 with
+its long gates, and the one workload that reaches the budget is everything at once. tinyacid
+alone is 218-274 instructions a sample under Callgrind on x86-64 (`acidbench.c`; tinybass is
+124). Built with `-DTA_OS=1` (the ladder once a sample instead of twice) the same eight rows
+are 3-6 points lower (the last: 57.8 % / 93.7 %). Not measured on an SP-1.
 
 The modal kits (modal gamelan, iron vibes) peak highest, when four voices are struck on the
 same 16th. Wakes queues one block, so a single block over budget is absorbed without a

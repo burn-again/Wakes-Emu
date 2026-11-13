@@ -70,7 +70,15 @@ struct sp1_drums_cfg {
 	int   bass_octaves;           /* 1..4                                               */
 	float bass_res, bass_env, bass_glide, bass_sub;   /* 0..1                           */
 	float bass_level_db;          /* -40..0                                             */
+	/* [acid]: the acid line (a bass mode from SP1_BASS_ACID up) */
+	float acid_level_db;          /* -40..0                                             */
+	float acid_duck;              /* octaves the kick dips the cutoff, 0..3             */
+	float acid_transpose;         /* semitones, -24..24                                 */
+	float acid_dens[4];           /* the lanes: gate, accent, slide, octave; 0..1       */
+	int   acid_len[4];            /* their loops in steps, 0 = the pattern's, else 1..32 */
 };
+/* A bass mode's word in a preset and in drums.cnfg: off, y, rests, or an acid pattern's name. */
+const char *sp1_drums_bass_name(unsigned mode);
 void sp1_drums_cfg_defaults(struct sp1_drums_cfg *c);
 
 typedef void (*sp1_drums_cfg_problem)(void *ctx, int line, const char *what, const char *why);

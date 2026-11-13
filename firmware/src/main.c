@@ -1711,9 +1711,8 @@ int main(void)
 			for (int k = 0; k < 4; k++) {
 				cables += (dp.t_dest[k] != 0u) + (dp.x_dest[k] != 0u);
 			}
-			static const char *const bm[3] = { "off", "y", "rests" };
 			printk("DRUMS kit %d: %s, bass %s, %d cable%s, rests %s\n", dp.kit + 1,
-			       sp1_drums_kit_name(dp.kit), bm[dp.bass_mode < 3u ? dp.bass_mode : 0u],
+			       sp1_drums_kit_name(dp.kit), sp1_drums_bass_name(dp.bass_mode),
 			       cables, cables == 1 ? "" : "s", dp.rest_choke ? "choke" : "ring out");
 		}
 #endif

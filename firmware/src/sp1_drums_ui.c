@@ -8,6 +8,7 @@
 #include "sp1_controls.h"    /* enum sp1_button: the bits of sp1_dui_keys' masks */
 #include "sp1_drums.h"       /* the kits, the model list, the map bank            */
 #include "sp1_drums_patch.h" /* the state a preset holds, drums.cnfg              */
+#include "sp1_acid.h"        /* the acid patterns and their sounds                */
 #include "sp1_ui_timing.h"   /* SP1_ENGINE_LED_FULL / HALF                        */
 
 #include <math.h>
@@ -661,16 +662,43 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 		} else if (drum_page) {
 			model_step(dn, dir);
 		} else if (on_set) {
+			const bool was_acid = pt.bass_mode >= SP1_BASS_ACID;
 			pt.bass_mode = (uint8_t)((pt.bass_mode + (dir > 0 ? 1 : SP1_BASS_MODES - 1)) %
 						 SP1_BASS_MODES);
-			static const char *const bn[SP1_BASS_MODES] = {
-				"off", "on the Y clock (Y picks the note)", "only in the rests" };
-			const uint8_t lv[4] = { pt.bass_mode == 1 ? SP1_ENGINE_LED_FULL : 0u,
-						pt.bass_mode == 2 ? SP1_ENGINE_LED_FULL : 0u,
-						pt.bass_mode == 2 ? SP1_ENGINE_LED_FULL : 0u,
-						pt.bass_mode == 1 ? SP1_ENGINE_LED_FULL : 0u };
-			flash(lv);
-			LOG("BASS %s\n", bn[pt.bass_mode]);
+			if (pt.bass_mode >= SP1_BASS_ACID) {
+				/* An acid pattern brings its sound: SETTINGS + SHIFT becomes its cutoff,
+				 * resonance, decay and drive, and the faders catch up from there. The row
+				 * shows the pattern's number in binary, T1 the low bit, over a half-lit row. */
+				const int i = pt.bass_mode - SP1_BASS_ACID;
+				const struct sp1_acid_preset *ap = sp1_acid_preset(i);
+				stored[L_SET_SH][0] = ap->p[0];        /* cutoff    */
+				stored[L_SET_SH][1] = ap->p[1];        /* resonance */
+				stored[L_SET_SH][2] = ap->p[3];        /* decay     */
+				stored[L_SET_SH][3] = ap->p[5];        /* drive     */
+				pickup_all();
+				uint8_t lv[4];
+				for (int b = 0; b < 4; b++) {
+					lv[b] = ((i + 1) >> b) & 1 ? SP1_ENGINE_LED_FULL : SP1_ENGINE_LED_HALF;
+				}
+				flash(lv);
+				LOG("BASS acid %d: %s (%s)\n", i + 1, ap->name, ap->chr ? "101" : "303");
+			} else {
+				if (was_acid) {
+					/* back to the bass: its own octave, shape, cutoff and decay */
+					struct sp1_drums_patch d;
+					sp1_drums_patch_default(&d, pt.kit);
+					memcpy(stored[L_SET_SH], d.v[L_SET_SH], sizeof stored[0]);
+					pickup_all();
+				}
+				static const char *const bn[3] = {
+					"off", "on the Y clock (Y picks the note)", "only in the rests" };
+				const uint8_t lv[4] = { pt.bass_mode == 1 ? SP1_ENGINE_LED_FULL : 0u,
+							pt.bass_mode == 2 ? SP1_ENGINE_LED_FULL : 0u,
+							pt.bass_mode == 2 ? SP1_ENGINE_LED_FULL : 0u,
+							pt.bass_mode == 1 ? SP1_ENGINE_LED_FULL : 0u };
+				flash(lv);
+				LOG("BASS %s\n", bn[pt.bass_mode]);
+			}
 		}
 	}
 	if (ffwd_press) {
@@ -859,6 +887,26 @@ void sp1_dui_ctl(struct sp1_drums_ctl *o)
 	o->bass_p[5] = cfg.bass_glide;
 	o->bass_p[6] = cfg.bass_sub;
 	o->bass_p[7] = zone_value(zone(bs[0], 5), 5);        /* octave: five steps */
+	/* the acid line: the pattern's sound, with SETTINGS + SHIFT as cutoff, resonance, decay, drive */
+	if (pt.bass_mode >= SP1_BASS_ACID && pt.bass_mode < SP1_BASS_MODES) {
+		const struct sp1_acid_preset *ap = sp1_acid_preset(pt.bass_mode - SP1_BASS_ACID);
+		o->acid_chr = ap->chr;
+		for (int i = 0; i < SP1_ACID_NPARAM; i++) {
+			o->acid_p[i] = ap->p[i];
+		}
+		o->acid_p[0] = clamp01(bs[0]);
+		o->acid_p[1] = clamp01(bs[1]);
+		o->acid_p[3] = clamp01(bs[2]);
+		o->acid_p[5] = clamp01(bs[3]);
+		o->acid_gate = ap->gate;
+		o->acid_level = powf(10.0f, cfg.acid_level_db / 20.0f) * 2.5f;
+		o->acid_duck = cfg.acid_duck;
+		o->acid_transpose = cfg.acid_transpose;
+		for (int l = 0; l < 4; l++) {
+			o->acid_dens[l] = cfg.acid_dens[l];
+			o->acid_len[l] = (uint8_t)cfg.acid_len[l];
+		}
+	}
 	o->n_deg = (uint8_t)(mrb.n_deg > 12 ? 12 : (mrb.n_deg < 0 ? 0 : mrb.n_deg));
 	for (int i = 0; i < o->n_deg; i++) {
 		o->degrees[i] = mrb.degrees[i];

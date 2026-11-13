@@ -11,14 +11,18 @@ what it should (`--expect`).
 | `run3-sequencer.sh` | the sequencer playing: KIT F4 fill up and back, SETTINGS `••` + T1 (drum 1's pattern from the next kit), `••` + FFWD (bass on the Y clock), three cables from MARBLES (t1 -> slot 1, X2 -> tone, Y -> bass note), then a `••` hold to power off; the drive is dumped to `$OUT` (default `run3-drive`) |
 | `run4-reload.sh` | boots from run3's drive (`$IN`) with a bad `tape_release` in drums.cnfg: the line is named, the slot's `[drums]` loads with 0 bad fields, the kit, bass and cables are back, and the next power-off saves the same `[drums]` text |
 
+| `run5-acid.sh` | SETTINGS, `••` + FFWD to acid 1 with drums 2 and 4 muted, PLAY, SETTINGS + SHIFT F1 / F2 as its cutoff and resonance, on to acid 2, then a `••` hold to power off: the slot keeps `bass = campfire`. `WAV=file` writes what it played |
+| `acid-cpu.mjs` | not a pass / fail run: the **wasm** build's CPU meter over eight workloads, from the kit alone to four drums, the acid line and all four bus FX (`node acid-cpu.mjs emulator/web`) |
+
 The emulator lives on the `claude/wakes-emulator` branch (`emulator/`). Its `build.sh` needs
-three changes to build this tree: `sp1_drums_ui.c` and `sp1_drums_patch.c` in `WAKES_C` (and no `sp1_midifile.c`),
-`sp1_drums.cc` in `WAKES_CXX`, and the tinykit sources compiled with `-I third_party/tinykit`;
+three changes to build this tree: `sp1_drums_ui.c`, `sp1_drums_patch.c` and `sp1_acid.c` in `WAKES_C` (and no `sp1_midifile.c`),
+`sp1_drums.cc` in `WAKES_CXX`, and the tinykit sources (`tinykit`, `tinyfx`, `tinybass`, `tinyacid`) compiled with `-I third_party/tinykit`;
 build with `EMU_KCONFIG="SP1_DRUMS=y"`. Then:
 
     WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run1-pages.sh
     WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run2-rocker.sh
     WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run3-sequencer.sh
     WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run4-reload.sh
+    WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run5-acid.sh
 
 Each prints `[emu] N of N expectations met` and exits 0, or names what was missing.

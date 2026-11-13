@@ -11,7 +11,12 @@ extern "C" {
 #include "tinykit.h"
 #include "tinyfx.h"
 #include "tinybass.h"
+#include "tinyacid.h"
 }
+#include "sp1_acid.h"
+
+static_assert(TA_NPARAM == SP1_ACID_NPARAM, "sp1_acid.h's presets follow tinyacid's parameters");
+static_assert(SP1_BASS_MODES == SP1_BASS_ACID + SP1_ACID_PRESETS, "one bass mode per acid pattern");
 
 namespace {
 
@@ -169,6 +174,12 @@ uint8_t cur_eng[SP1_DRUMS_N], cur_model[SP1_DRUMS_N];
 bool voice_made[SP1_DRUMS_N];
 tfx_state fx;
 tb_voice bass;
+// The acid line, in the bass's place while bass_mode is an acid pattern.
+ta_voice acid;
+sp1_acid_seq aseq;
+bool acid_pend;                            // this step's event has not been played yet
+sp1_acid_event acid_ev;
+float acid_at, acid_off_at;                // where in the step it plays / its gate falls (< 0: no fall)
 int fade_left[SP1_DRUMS_N];                // samples left in a choke fade; 0 = none
 
 // ---- where we are: 16ths since PLAY, off Marbles' master ramp ----
@@ -242,6 +253,8 @@ inline float Norm(int k, float v) {
   if (!(hi > lo)) { lo = -5.0f; hi = 5.0f; }
   return Clamp01((v - lo) / (hi - lo));
 }
+
+inline bool AcidOn() { return ctl.bass_mode >= SP1_BASS_ACID && ctl.bass_mode < SP1_BASS_MODES; }
 
 inline int VoiceOf(int slot) { return (slot - rot) & 3; }
 // The slot each output's "own slot" cables act on: its t partner's slot when that is routed to
@@ -326,12 +339,30 @@ int Hit(int s, float vel, bool running) {
     u = Norm(k, last_volts[k]);
   }
   Strike(v, vel, u, semis, tone, decay);
+  if (s == 0 && AcidOn() && ctl.acid_duck > 0.0f) ta_duck(&acid, ctl.acid_duck);   // the kick's lane
   return v;
+}
+
+// The acid line's event for this step, at its moment.
+void AcidPlay() {
+  acid_pend = false;
+  switch (acid_ev.kind) {
+    case SP1_ACID_NOTE:
+      ta_note(&acid, acid_ev.note, acid_ev.accent ? TA_F_ACCENT : 0u);
+      st_bass = st_bass + 1u;
+      break;
+    case SP1_ACID_SLIDE:
+      ta_note(&acid, acid_ev.note, TA_F_SLIDE | (acid_ev.accent ? TA_F_ACCENT : 0u));
+      st_bass = st_bass + 1u;
+      break;
+    case SP1_ACID_TIE: break;
+    default: ta_gate_off(&acid); break;
+  }
 }
 
 // The bass: a note from Marbles' scale, chosen by Y.
 void BassHit(float vel) {
-  if (ctl.bass_mode == SP1_BASS_OFF) return;
+  if (ctl.bass_mode == SP1_BASS_OFF || AcidOn()) return;
   float span = static_cast<float>(ctl.bass_octaves > 0 ? ctl.bass_octaves : 1);
   float u = Norm(3, last_volts[3]);
   if (ctl.x_dest[3] == SP1_DX_BASS_NOTE) {
@@ -385,7 +416,9 @@ void RenderMachine(float* buf, uint32_t m) {
       for (uint32_t i = 0; i < m; ++i) buf[i] += slot_buf[i] * g;
     }
   }
-  if (ctl.bass_mode != SP1_BASS_OFF && tb_active(&bass)) {
+  if (AcidOn()) {
+    ta_render_mix(&acid, buf, m, ctl.acid_level);    // idle: its envelopes run on, nothing is rendered
+  } else if (ctl.bass_mode != SP1_BASS_OFF && tb_active(&bass)) {
     tb_render_mix(&bass, buf, m, ctl.bass_level);
   }
   tfx_process(&fx, buf, nullptr, m);
@@ -528,6 +561,11 @@ extern "C" int sp1_drums_map_len(int bank, int slot) {
 extern "C" void sp1_drums_init(void) {
   tfx_init(&fx);
   tb_init(&bass);
+  ta_init(&acid);
+  sp1_acid_init();
+  sp1_acid_seq_reset(&aseq);
+  acid_pend = false;
+  acid_off_at = -1.0f;
   memset(&ctl, 0, sizeof ctl);
   for (int v = 0; v < SP1_DRUMS_N; ++v) {
     const sp1_drums_voice_def& d = kKits[0][v];
@@ -558,6 +596,12 @@ extern "C" void sp1_drums_begin(const sp1_synth_params* c) {
   tfx_set(&fx, TFX_CRUSH, 0.0f);
   tfx_set_carrier(&fx, ctl.fm_hz > 0.0f ? ctl.fm_hz : 196.0f);
   for (int i = 0; i < TB_NPARAM && i < 8; ++i) tb_set(&bass, static_cast<unsigned>(i), Clamp01(ctl.bass_p[i]));
+  if (AcidOn()) {
+    ta_character(&acid, ctl.acid_chr);
+    for (int i = 0; i < TA_NPARAM; ++i) ta_set(&acid, static_cast<unsigned>(i), Clamp01(ctl.acid_p[i]));
+  } else if (acid.gate) {
+    ta_gate_off(&acid);                // the mode was left with a note held
+  }
   ApplyFx();
   // The CPU guard: when the last block's render took over kShedAt of its budget, fade the
   // quietest ringing voice if it is a tail (below -20 dB) -- one per block, over the usual
@@ -641,6 +685,12 @@ extern "C" void sp1_drums_render(const sp1_drums_frame* f, float* out, uint32_t 
     step = -1;
     t2_count = 0u;
     for (float& p : pend_vel) p = 0.0f;
+    sp1_acid_seq_reset(&aseq);
+  }
+  if (!running && was_running) {                       // stopped: the line lets go
+    ta_gate_off(&acid);
+    acid_pend = false;
+    acid_off_at = -1.0f;
   }
   was_running = running;
   bool new_step = false;
@@ -763,6 +813,24 @@ extern "C" void sp1_drums_render(const sp1_drums_frame* f, float* out, uint32_t 
     SequencerStep(running);
     struck |= last_hits;
     last_hits = before;
+    // The acid line: this step's event, resolved from its four lanes. A gate still up from
+    // the step before falls first, unless this step carries the note on.
+    if (AcidOn() && running) {
+      if (acid_pend) AcidPlay();
+      if (acid_off_at >= 0.0f) ta_gate_off(&acid);
+      sp1_acid_perf perf;
+      for (int l = 0; l < SP1_ACID_LANES; ++l) {
+        perf.dens[l] = Clamp01(ctl.acid_dens[l]);
+        perf.len[l] = ctl.acid_len[l];
+      }
+      perf.transpose = ctl.acid_transpose;
+      acid_ev = sp1_acid_seq_step(&aseq, sp1_acid_pattern_of(ctl.bass_mode - SP1_BASS_ACID), &perf, g16);
+      acid_pend = true;
+      acid_at = ((g16 & 1) != 0 && ctl.swing > 0.0f) ? ctl.swing * (1.0f / 3.0f) : 0.0f;
+      const float gate = ctl.acid_gate > 0.05f ? ctl.acid_gate : 0.05f;
+      const float off = acid_at + gate;
+      acid_off_at = (acid_ev.hold || acid_ev.kind == SP1_ACID_REST) ? -1.0f : (off < 0.97f ? off : 0.97f);
+    }
     // Bass in the rests: 8th notes on steps every slot has rested.
     if (ctl.bass_mode == SP1_BASS_RESTS && (step & 1) == 0) {
       bool all = true;
@@ -781,6 +849,16 @@ extern "C" void sp1_drums_render(const sp1_drums_frame* f, float* out, uint32_t 
           pend_vel[s] = 0.0f;
         }
       }
+    }
+  }
+  // The acid line's note lands at its moment in the step (late on a swung 16th), and its
+  // gate falls part-way through unless a slide or a tie follows.
+  if (running && AcidOn() && (acid_pend || acid_off_at >= 0.0f)) {
+    const float into = f->ramp * 4.0f - static_cast<float>(last_q);
+    if (acid_pend && into >= acid_at) AcidPlay();
+    if (!acid_pend && acid_off_at >= 0.0f && into >= acid_off_at) {
+      ta_gate_off(&acid);
+      acid_off_at = -1.0f;
     }
   }
   if (f->audition) {
