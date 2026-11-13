@@ -101,7 +101,58 @@ static const struct sp1_acid_preset kPresets[SP1_ACID_PRESETS] = {
 	  "F#1 F#2 . F#1 A1 . B1 C#2~ | F#1 F#2 . E2 . C#2 B1~ A1",
 	  1, { 0.45f, 0.50f, 0.35f, 0.30f, 0.50f, 0.15f, 0.10f, 0.30f, 0.30f, 0.0f, 0.0f, 0.50f, 0.30f, 1.0f },
 	  0.55f, { 0.5f, 0.0f, 0.0f, 0.0f }, 124.0f, { 0, 0, 0, 0 } },
-	/* 18: the user's line from drums.cnfg, with the plain sound. */
+	/* 18: psytrance. The rolling bass: nothing on the kick, three sixteenths after it. */
+	{ "psytrance",
+	  ". E1 E1 E1 . E1 E1 E1 | . E1 E1 E1 . E1 G1 E1",
+	  0, { 0.40f, 0.45f, 0.45f, 0.15f, 0.50f, 0.20f, 0.0f, 0.0f, 0.20f, 0.0f, 0.0f, 0.30f, 0.30f, 1.0f },
+	  0.40f, { 0.5f, 0.0f, 0.0f, 0.0f }, 145.0f, { 0, 0, 0, 0 } },
+	/* 19: dub-techno. A stab off the beat with a long tail and a little noise: made to be
+	 * filtered and sent through the FM. */
+	{ "dub-techno",
+	  ". . D2 . . . D2 _ | . . D2 . . F2~ _ .",
+	  1, { 0.35f, 0.55f, 0.60f, 0.80f, 0.40f, 0.10f, 0.60f, 0.30f, 0.20f, 0.10f, 0.0f, 0.60f, 0.20f, 1.0f },
+	  0.50f, { 0.40f, 0.0f, 0.0f, 0.15f }, 118.0f, { 0, 0, 0, 0 } },
+	/* 20: uk-garage. A skipping sub that leaves the two and the four alone; play it swung. */
+	{ "uk-garage",
+	  "C2 . . C2 . . . G1~ | . A#1 . . C2! . D#2~ .",
+	  1, { 0.30f, 0.35f, 0.40f, 0.45f, 0.50f, 0.20f, 0.20f, 0.30f, 0.80f, 0.0f, 0.0f, 0.60f, 0.40f, 1.0f },
+	  0.70f, { 0.5f, 0.0f, 0.0f, 0.0f }, 132.0f, { 0, 0, 0, 0 } },
+	/* 21: trap. Long sub notes that bend into each other, driven so a small speaker hears them. */
+	{ "trap",
+	  "C1! _ _ _ . . C1 _ | _ . D#1~ _ C1 . G0!~ _",
+	  1, { 0.30f, 0.20f, 0.30f, 0.90f, 0.60f, 0.50f, 0.10f, 0.30f, 1.00f, 0.0f, 0.0f, 0.85f, 0.80f, 0.60f },
+	  1.00f, { 0.5f, 0.0f, 0.20f, 0.0f }, 140.0f, { 0, 0, 0, 0 } },
+	/* 22: synthwave. An eighth-note pulse bass with the octave on the off-beats: A, F, G. */
+	{ "synthwave",
+	  "A1 A1 A2 A1 A1 A2 A1 A2 | F1 F1 F2 F1 G1 G1 G2 G1",
+	  1, { 0.50f, 0.35f, 0.40f, 0.30f, 0.40f, 0.10f, 0.80f, 0.40f, 0.30f, 0.0f, 0.0f, 0.40f, 0.30f, 1.0f },
+	  0.60f, { 0.5f, 0.0f, 0.0f, 0.0f }, 100.0f, { 0, 0, 0, 0 } },
+	/* 23: afrobeat. A D-minor line that answers itself across the bar. */
+	{ "afrobeat",
+	  "D2 . D2 F2 . G2 . D2 | . A1 C2 . D2 . F2~ G2",
+	  1, { 0.45f, 0.35f, 0.40f, 0.30f, 0.50f, 0.10f, 0.15f, 0.40f, 0.30f, 0.0f, 0.0f, 0.50f, 0.30f, 1.0f },
+	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 112.0f, { 0, 0, 0, 0 } },
+	/* 24: ebm. Sixteenths, root and octave, accents on the ones, a square with drive. */
+	{ "ebm",
+	  "E1! E1 E2 E1 E1! E2 E1 E1 | E1! E1 E2 E1 G1! G2 F#1 F#2",
+	  0, { 0.40f, 0.50f, 0.50f, 0.20f, 0.80f, 0.50f, 1.0f, 0.0f, 0.20f, 0.0f, 0.0f, 0.40f, 0.30f, 1.0f },
+	  0.45f, { 0.5f, 0.0f, 0.20f, 0.0f }, 124.0f, { 0, 0, 0, 0 } },
+	/* 25: footwork. A sub in threes against a kit in fours. */
+	{ "footwork",
+	  "F1! . . F1 . . F1! . | . F1 . . G#1! . F1~ .",
+	  1, { 0.28f, 0.25f, 0.30f, 0.35f, 0.70f, 0.40f, 0.10f, 0.30f, 1.00f, 0.0f, 0.0f, 0.50f, 0.40f, 0.70f },
+	  0.70f, { 0.5f, 0.0f, 0.10f, 0.0f }, 160.0f, { 0, 0, 0, 0 } },
+	/* 26: italo. Octaves and fifths in sixteenths: C, B flat, G. */
+	{ "italo",
+	  "C2 C3 G2 C3 C2 C3 G2 C3 | A#1 A#2 F2 A#2 G1 G2 D2 G2",
+	  1, { 0.48f, 0.40f, 0.35f, 0.25f, 0.40f, 0.05f, 0.70f, 0.30f, 0.20f, 0.0f, 0.0f, 0.40f, 0.20f, 1.0f },
+	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 122.0f, { 0, 0, 0, 0 } },
+	/* 27: gqom. Low, sparse and broken, with filter FM for the growl. */
+	{ "gqom",
+	  "C1! . . C1 . . C1! . | . . C1 . C1! . . D#1~",
+	  0, { 0.30f, 0.60f, 0.60f, 0.35f, 0.90f, 0.60f, 0.20f, 0.0f, 0.60f, 0.0f, 0.35f, 0.50f, 0.50f, 1.0f },
+	  0.60f, { 0.5f, 0.0f, 0.0f, 0.0f }, 124.0f, { 0, 0, 0, 0 } },
+	/* 28: the user's line from drums.cnfg, with the plain sound. */
 	{ "user", NULL,
 	  0, { 0.32f, 0.75f, 0.60f, 0.30f, 0.70f, 0.15f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.50f, 0.50f, 1.0f },
 	  0.50f, { 0.5f, 0.0f, 0.0f, 0.0f }, 126.0f, { 0, 0, 0, 0 } },

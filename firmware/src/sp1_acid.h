@@ -93,7 +93,7 @@ struct sp1_acid_event sp1_acid_seq_step(struct sp1_acid_seq *q, const struct sp1
 					const struct sp1_acid_perf *f, int32_t g16);
 
 /* ---- the built-in patterns, each with its sound ---- */
-#define SP1_ACID_BUILTIN 17
+#define SP1_ACID_BUILTIN 27
 #define SP1_ACID_PRESETS (SP1_ACID_BUILTIN + 1)     /* the last is the user's (drums.cnfg) */
 #define SP1_ACID_NPARAM 14                           /* tinyacid's TA_NPARAM                */
 struct sp1_acid_preset {

@@ -100,7 +100,7 @@ envelope, glide) that plays **notes from Marbles' scale**, chosen by Marbles' **
 
 A 303 / 101 voice (`third_party/tinykit/tinyacid`) playing a 16-step pattern **in the bass's
 place**. It is the bass mode after "only in the rests": **SETTINGS `••` + FFWD / RWD** steps
-on through the acid patterns (`BASS acid 1: acid-home (303)`), eighteen of them, and back
+on through the acid patterns (`BASS acid 1: acid-home (303)`), twenty-eight of them, and back
 round to off (RWD from off reaches the last ones first). The row shows the pattern's number
 in base 3 (off 0, half 1, full 2), T1 the ones; the log names it.
 
@@ -123,7 +123,17 @@ in base 3 (off 0, half 1, full 2), T1 the ones; the log names it.
 | 15 **markov** | 303 | one walk of a Markov chain over A minor pentatonic; gate, accent and octave lanes loop every 12 steps under 16 pitches, so it comes round every three bars |
 | 16 **electro-house** | 101 | off the beat, so the kick's duck pumps it |
 | 17 **french-house** | 101 | a disco octave line in F# minor; the filter is yours to sweep |
-| 18 **user** | 303 | `line =` in drums.cnfg's `[acid]` |
+| 18 **psytrance** | 303 | nothing on the kick, three sixteenths after it |
+| 19 **dub-techno** | 101 | a stab off the beat with a long tail, for the filter and the FM |
+| 20 **uk-garage** | 101 | a skipping sub; play it swung |
+| 21 **trap** | 101 | long sub notes that bend into each other, driven |
+| 22 **synthwave** | 101 pulse | an eighth-note bass with the octave on the off-beats |
+| 23 **afrobeat** | 101 | a D-minor line that answers itself across the bar |
+| 24 **ebm** | 303 square | sixteenths, root and octave, accents on the ones |
+| 25 **footwork** | 101 | a sub in threes against a kit in fours |
+| 26 **italo** | 101 pulse | octaves and fifths in sixteenths |
+| 27 **gqom** | 303 | low, sparse and broken, with filter FM |
+| 28 **user** | 303 | `line =` in drums.cnfg's `[acid]` |
 
 - A pattern brings its sound (character, waveform, envelope depth, accent, slide time ...).
   **SETTINGS + SHIFT** is then **F1 cutoff · F2 resonance · F3 decay · F4 drive**, set to the
@@ -195,7 +205,8 @@ What it is for (`drumtest` renders each as `jam*.wav`):
 
 And one per genre pattern (`genre_*.wav`, ten bars each over a kit that suits it): two bars
 as written, a fader move played in bar 3 and kept, three bars of it looping, one lane changed
-in bars 7-8, and a snap back at bar 9. `drumtest` prints what each one does.
+in bars 7-8, and a snap back at bar 9. The last ten also move one bus FX by hand over bars
+4-8. `drumtest` prints what each one does.
 
 **A pattern as text** — one token per 16th, up to 32:
 

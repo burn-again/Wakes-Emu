@@ -461,7 +461,10 @@ int main(int argc, char** argv) {
     // Ten bars: two as written; bar 3 the hand plays `shape` on one fader; keep at the bar line
     // and three bars loop hands-off; bars 7-8 one lane changes (its density or its loop length,
     // as the LANES page would); snap back at bar 9: the fader, the take and the lane are home.
-    struct Genre { int i, kit; uint8_t solo; float duck; int param, shape; float lo, hi; int lane; float dens; int len; const char* does; };
+    // Where a row names a bus FX, the hand also takes it from its start to `fxto` over bars 4-8
+    // (KIT + SHIFT; FX moves are not recorded) and lets it go at the snap back.
+    struct Genre { int i, kit; uint8_t solo; float duck; int param, shape; float lo, hi; int lane; float dens; int len; const char* does;
+                   int fxi = -1; float fxto = 0.0f, swing = 0.0f; };
     static const Genre kGenres[] = {
       {  8, 1, 0xF, 0.3f, 0, 2, 0.20f, 0.50f, 0, -1.0f,  6, "cutoff wobble kept; then the gate lane 6 steps long: the sub's rhythm turns against the break" },
       {  9, 2, 0x5, 0.3f, 0, 2, 0.30f, 0.62f, 2,  0.0f, -1, "a breath on the cutoff kept; then slide density 0: the bends become plucked notes" },
@@ -472,14 +475,25 @@ int main(int argc, char** argv) {
       { 14, 3, 0x5, 0.4f, 1, 4, 0.55f, 0.95f, 2, -1.0f,  5, "resonance flicks kept; then the slide lane 5 steps long, on top of its 12-step lanes" },
       { 15, 0, 0x5, 1.5f, 0, 1, 0.30f, 0.72f, 1,  0.0f, -1, "a closing filter kept, with the kick ducking hard; then accent density 0: the line goes flat and even" },
       { 16, 4, 0x5, 1.0f, 0, 2, 0.15f, 0.78f, 0, -1.0f,  8, "the filter sweep kept; then the gate lane 8 steps long: the first half-bar's rhythm under all the notes" },
+      { 17, 0, 0x5, 0.8f, 0, 0, 0.25f, 0.65f, 1,  1.0f, -1, "a rising cutoff kept; the DJ filter opened to a high-pass over bars 4-8; then accent density up", 0, 0.80f },
+      { 18, 4, 0xF, 0.3f, 0, 2, 0.20f, 0.60f, 0, -1.0f, 12, "the stab's filter swell kept; the bus FM brought in over bars 4-8; then the gate lane 12 steps long", 3, 0.55f },
+      { 19, 1, 0x7, 0.4f, 3, 4, 0.25f, 0.70f, 0, -1.0f,  6, "the decay flicked short and long on the 8ths, kept; swung; the wavefolder in over bars 4-8; then the gate lane 6 steps", 1, 0.35f, 0.7f },
+      { 20, 0, 0x5, 0.0f, 5, 0, 0.30f, 1.00f, 2,  0.0f, -1, "the drive pushed up over a bar and kept, so every bar swells; Chebyshev in over bars 4-8; then slide density 0: the bends stop", 2, 0.50f },
+      { 21, 5, 0x5, 0.5f, 0, 2, 0.35f, 0.75f, 3, -1.0f,  4, "the filter opened and closed, kept; the DJ filter down to a low-pass over bars 4-8; then the octave lane 4 steps long", 0, 0.25f },
+      { 22, 2, 0x7, 0.4f, 1, 4, 0.30f, 0.80f, 0, -1.0f,  6, "resonance flicked on the 8ths kept; the wavefolder in; then the gate lane 6 steps long: the phrase turns over", 1, 0.25f, 0.4f },
+      { 23, 3, 0x5, 0.6f, 0, 3, 0.25f, 0.75f, 1, -1.0f,  3, "filter stabs on the off-beats kept; Chebyshev in over bars 4-8; then the accent lane 3 steps long", 2, 0.45f },
+      { 24, 1, 0xF, 0.2f, 5, 4, 0.30f, 0.90f, 0, -1.0f,  5, "the drive flicked on the 8ths kept; the bus FM in; then the gate lane 5 steps long: threes become fives", 3, 0.40f },
+      { 25, 5, 0x5, 0.5f, 0, 1, 0.30f, 0.72f, 0, -1.0f,  8, "a closing filter kept; the DJ filter opened to a high-pass over bars 4-8; then the gate lane 8 steps long", 0, 0.75f },
+      { 26, 3, 0x7, 0.9f, 1, 0, 0.45f, 0.98f, 1,  0.0f, -1, "resonance wound up over a bar and kept; the wavefolder in over bars 4-8; then accent density 0", 1, 0.45f },
     };
-    static const Genre* G; static float g_rest; static float g_home[4];
+    static const Genre* G; static float g_rest; static float g_home[4]; static float g_fx0;
     for (const Genre& g : kGenres) {
       G = &g;
       const struct sp1_acid_preset* ap = sp1_acid_preset(g.i);
       g_rest = ap->p[g.param];
       g_home[0] = ap->len[0]; g_home[1] = ap->len[1]; g_home[2] = ap->len[2]; g_home[3] = ap->len[3];
       r_kit = g.kit; r_solo = g.solo; r_duck = g.duck;
+      g_fx0 = g.fxi >= 0 ? ap->fx[g.fxi] : 0.0f;
       char name[64]; snprintf(name, sizeof name, "genre_%s", ap->name);
       render(name, g.i, 10, [](float bar, sp1_drums_ctl& d) {
         const float in = bar - floorf(bar);
@@ -494,6 +508,9 @@ int main(int argc, char** argv) {
           }
           d.acid_p[G->param] = G->lo + (G->hi - G->lo) * u;
         }
+        d.swing = G->swing;
+        if (G->fxi >= 0 && bar >= 3.0f && bar < 8.0f) d.fx[G->fxi] = g_fx0 + (G->fxto - g_fx0) * (bar - 3.0f) / 5.0f;
+        if (G->fxi >= 0 && bar >= 8.0f) d.fx[G->fxi] = g_fx0;
         ONCE(3.0f, { d.acid_p[G->param] = g_rest; d.acid_keep_seq++; });
         ONCE(6.0f, { if (G->dens >= 0.0f) d.acid_dens[G->lane] = G->dens; if (G->len >= 0) d.acid_len[G->lane] = (uint8_t)G->len; });
         ONCE(8.0f, { d.acid_dens[G->lane] = 0.5f; d.acid_len[G->lane] = (uint8_t)g_home[G->lane]; d.acid_snap_to = 0; d.acid_snap_seq++; });
