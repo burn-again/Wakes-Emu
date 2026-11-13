@@ -159,7 +159,8 @@ in base 3 (off 0, half 1, full 2), T1 the ones; the log names it.
   brings in the marks written with a weight (`C2!4`); down thins the lane, to nothing at the
   bottom: gate down mutes notes, slide down turns bends into plucked notes, accent down
   flattens the line.
-- **Length** is eight zones: **2, 3, 4, 5, 6, 8, 12** steps, and at the top **the pattern's
+- **Length** is eight zones, with hysteresis (a fader resting on a boundary does not flip
+  between two lengths; the drum pages' loop length and the bass octave have it too): **2, 3, 4, 5, 6, 8, 12** steps, and at the top **the pattern's
   own**. A shorter lane loops its first steps under all the notes, so it drifts against them:
   an accent lane 3 long over 16 notes moves the accents every beat. The log says what a lane
   became (`LANE accent: 3 steps`).
@@ -465,15 +466,18 @@ tinyacid are not among the engines the model was fitted to, so read these as ±7
 | four drums, bass off | 29.6 % | 51.3 % |
 | kick + hat | 27.7 % | 42.8 % |
 | kick + hat + the old bass on the Y clock | 28.5 % | 52.4 % |
-| kick + hat + acid-home (303) | 44.0 % | 67.3 % |
-| kick + hat + campfire (101: pulse, sub, noise) | 54.6 % | 70.0 % |
-| kick + hat + crawl (303: sub, filter FM, drive) | 41.6 % | 74.7 % |
-| four drums + crawl | 43.4 % | 82.7 % |
-| four drums + crawl + all four bus FX | 61.2 % | 100.5 % |
+| kick + hat + acid-home (303) | 44.0 % | 61.5 % |
+| kick + hat + campfire (101: pulse, sub, noise) | 54.5 % | 70.0 % |
+| kick + hat + crawl (303: sub, filter FM, drive) | 41.5 % | 67.3 % |
+| four drums + crawl | 43.3 % | 76.4 % |
+| four drums + crawl + all four bus FX | 61.1 % | 93.9 % |
 
 So the line costs about 16 points over a kick and a hat as a 303 and about 27 as the 101 with
 its long gates (a point of that is the fader recording, which runs whether or not a take is
-kept), and the one workload that reaches the budget is everything at once. tinyacid
+kept), and the heaviest block of everything at once stays under the budget. That block was
+100.5 % until three things were taken out of it: an accent no longer recomputes the filter's
+decay (both are kept ready), a note that falls on a block of drum strikes waits one block
+(0.5 ms), and the fader record is written once per point, not once per block. tinyacid
 alone is 218-274 instructions a sample under Callgrind on x86-64 (`acidbench.c`; tinybass is
 124). Built with `-DTA_OS=1` (the ladder once a sample instead of twice) the same eight rows
 were 3-6 points lower when measured before the fader recording went in (the last row then:

@@ -100,11 +100,11 @@ static void acid_home_put(const float h[12])
 	memcpy(stored[L_LANE_SH], h + 8, sizeof stored[0]);
 }
 /* A lane's loop from its fader: eight zones, the top one the pattern's own (0). */
+static int zone_h(int8_t *held, float v, int n);
+static int8_t zh_lane[4] = { -1, -1, -1, -1 };
 static uint8_t lane_len(int l)
 {
-	int z = (int)(stored[L_LANE_SH][l] * (float)SP1_ACID_LEN_ZONES);
-	z = z < 0 ? 0 : (z > SP1_ACID_LEN_ZONES - 1 ? SP1_ACID_LEN_ZONES - 1 : z);
-	return sp1_acid_len_zone(z);
+	return sp1_acid_len_zone(zone_h(&zh_lane[l], stored[L_LANE_SH][l], SP1_ACID_LEN_ZONES));
 }
 static bool     burst;
 static float    speed = 1.0f;
@@ -147,6 +147,26 @@ static int zone(float v, int n)
 	return z < 0 ? 0 : (z > n - 1 ? n - 1 : z);
 }
 static float zone_value(int z, int n) { return ((float)z + 0.5f) / (float)n; }
+/* A zone with hysteresis: a fader resting on a boundary reads a few counts either side of it
+ * from scan to scan, which without this would flip the zone back and forth. The zone held in
+ * *held is only left once the fader is a quarter of a zone past its edge (or lands further
+ * away than the next zone: a preset, a snap back). */
+static int zone_h(int8_t *held, float v, int n)
+{
+	const float x = clamp01(v) * (float)n;
+	const int z = zone(v, n);
+	if (*held < 0 || *held >= n) {
+		*held = (int8_t)z;
+	} else if (z != *held) {
+		const float edge = z > *held ? (float)(*held + 1) : (float)*held;
+		const int far = z > *held ? z - *held : *held - z;
+		if (far > 1 || fabsf(x - edge) >= 0.25f) {
+			*held = (int8_t)z;
+		}
+	}
+	return *held;
+}
+static int8_t zh_len[4] = { -1, -1, -1, -1 }, zh_oct = -1;
 
 __attribute__((format(printf, 1, 2)))
 static void LOG(const char *fmt, ...)
@@ -1031,7 +1051,7 @@ void sp1_dui_ctl(struct sp1_drums_ctl *o)
 		o->excite[v] = clamp01(sh[3]);
 		o->level[v] = pt.gain[v] * 2.0f * clamp01(sh[1]);
 		o->density[v] = clamp01(sh[0]);
-		o->len[v] = kLen[zone(sh[2], 5)];
+		o->len[v] = kLen[zone_h(&zh_len[v], sh[2], 5)];
 		o->pat[v] = pt.pat[v];
 		o->t_dest[v] = pt.t_dest[v];
 		o->x_dest[v] = pt.x_dest[v];
@@ -1074,7 +1094,7 @@ void sp1_dui_ctl(struct sp1_drums_ctl *o)
 	o->bass_p[4] = clamp01(bs[3]);                       /* decay   */
 	o->bass_p[5] = cfg.bass_glide;
 	o->bass_p[6] = cfg.bass_sub;
-	o->bass_p[7] = zone_value(zone(bs[0], 5), 5);        /* octave: five steps */
+	o->bass_p[7] = zone_value(zone_h(&zh_oct, bs[0], 5), 5);   /* octave: five steps */
 	/* the acid line: the pattern's sound, with SETTINGS + SHIFT as cutoff, resonance, decay, drive */
 	if (pt.bass_mode >= SP1_BASS_ACID && pt.bass_mode < SP1_BASS_MODES) {
 		const struct sp1_acid_preset *ap = sp1_acid_preset(pt.bass_mode - SP1_BASS_ACID);

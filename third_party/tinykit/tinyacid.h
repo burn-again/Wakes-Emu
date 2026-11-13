@@ -55,7 +55,7 @@ typedef struct {
   float fc;                             /* the cutoff the last block ended on, Hz (for tests) */
   /* per-sample and per-block rates, worked out when dirty */
   float atk_step, amp_kd, amp_kr, amp_sus;
-  float fenv_kb, fenv_krb, fenv_sus, cap_kb, duck_kb, glide_kb;
+  float fenv_kb, fenv_kb_acc, fenv_krb, fenv_sus, cap_kb, duck_kb, glide_kb;   /* _acc: an accented 303 note's */
 } ta_voice;
 
 void ta_init(ta_voice *v);

@@ -178,6 +178,7 @@ tb_voice bass;
 ta_voice acid;
 sp1_acid_seq aseq;
 bool acid_pend;                            // this step's event has not been played yet
+bool acid_waited;                          // ...and has already stood aside for a block of strikes
 sp1_acid_event acid_ev;
 float acid_at, acid_off_at;                // where in the step it plays / its gate falls (< 0: no fall)
 // Its recorded fader moves: 64 points a bar (four per 16th) for cutoff, resonance, decay and
@@ -840,6 +841,7 @@ extern "C" void sp1_drums_render(const sp1_drums_frame* f, float* out, uint32_t 
     // the step before falls first, unless this step carries the note on.
     if (AcidOn() && running) {
       if (acid_pend) AcidPlay();
+      acid_waited = false;
       if (acid_off_at >= 0.0f) ta_gate_off(&acid);
       sp1_acid_perf perf;
       for (int l = 0; l < SP1_ACID_LANES; ++l) {
@@ -891,12 +893,12 @@ extern "C" void sp1_drums_render(const sp1_drums_frame* f, float* out, uint32_t 
         mot_fill = false;
         mot_last = pos;
       }
-      // every point passed since the last block takes the faders as they are now
+      // every point passed since the last block takes the faders as they are now (a point
+      // lasts several blocks: it keeps what the faders were as it began)
       for (int n = 0; mot_last != pos && n < kMotN; ++n) {
-        mot_last = (mot_last + 1) % kMotN;
+        mot_last = (mot_last + 1) & (kMotN - 1);
         for (int k = 0; k < 4; ++k) mot_rec[mot_last][k] = live[k];
       }
-      for (int k = 0; k < 4; ++k) mot_rec[pos][k] = live[k];
     }
     if (ctl.acid_keep_seq != keep_seen) {
       keep_seen = ctl.acid_keep_seq;
@@ -913,8 +915,8 @@ extern "C" void sp1_drums_render(const sp1_drums_frame* f, float* out, uint32_t 
       snap_seen = ctl.acid_snap_seq;
       if (ctl.acid_snap_to < mot_takes) mot_takes = ctl.acid_snap_to;
     }
-    if (pos >= 0) {
-      const int nx = (pos + 1) % kMotN;
+    if (pos >= 0 && mot_takes > 0) {
+      const int nx = (pos + 1) & (kMotN - 1);
       for (int t = 0; t < mot_takes; ++t) {
         for (int k = 0; k < 4; ++k) now[k] += mot_take[t][pos][k] + (mot_take[t][nx][k] - mot_take[t][pos][k]) * frac;
       }
@@ -930,7 +932,12 @@ extern "C" void sp1_drums_render(const sp1_drums_frame* f, float* out, uint32_t 
   // gate falls part-way through unless a slide or a tie follows.
   if (running && AcidOn() && (acid_pend || acid_off_at >= 0.0f)) {
     const float into = f->ramp * 4.0f - static_cast<float>(last_q);
-    if (acid_pend && into >= acid_at) AcidPlay();
+    // A note that falls on a block in which drums were struck waits one block (half a
+    // millisecond): the strikes are the dearest thing a block can hold.
+    if (acid_pend && into >= acid_at) {
+      if (struck && !acid_waited) acid_waited = true;
+      else { AcidPlay(); acid_waited = false; }
+    }
     if (!acid_pend && acid_off_at >= 0.0f && into >= acid_off_at) {
       ta_gate_off(&acid);
       acid_off_at = -1.0f;

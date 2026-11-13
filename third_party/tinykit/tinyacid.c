@@ -104,7 +104,7 @@ void ta_note(ta_voice *v, float note, unsigned flags) {
   const int sounding = v->gate && v->amp > 0.02f;
   const int acc = (flags & TA_F_ACCENT) != 0;
   v->target = clampf(note, 0.0f, 127.0f);
-  if (acc != v->accented) { v->accented = (uint8_t)acc; v->dirty |= D_ENV; }
+  v->accented = (uint8_t)acc;                      /* both decays are kept ready: no libm here */
   v->accg_t = 1.0f + (acc ? v->p[TA_ACCENT] * r->acc_amp : 0.0f);
   v->gate = 1;
   if ((flags & TA_F_SLIDE) && sounding) return;     /* legato: the envelopes carry on, the pitch glides */
@@ -125,8 +125,8 @@ static void ta_update(ta_voice *v, unsigned n) {
   if (what & D_ENV) {
     /* times are to -60 dB, so tau = T / 6.9 */
     const float dec = 0.2f * exp2f(v->p[TA_DECAY] * 3.65f);                 /* 0.2 .. 2.5 s */
-    const float fdec = (v->accented && !r->adsr) ? 0.2f : dec;
-    v->fenv_kb = expf(-6.9f * fn / (fdec * SR));
+    v->fenv_kb = expf(-6.9f * fn / (dec * SR));
+    v->fenv_kb_acc = r->adsr ? v->fenv_kb : expf(-6.9f * fn / (0.2f * SR));
     v->atk_step = 1.0f / ((r->adsr ? 0.0015f : 0.003f) * SR);
     if (r->adsr) {
       v->amp_sus = v->fenv_sus = v->p[TA_HOLD];
@@ -137,7 +137,7 @@ static void ta_update(ta_voice *v, unsigned n) {
       v->amp_sus = v->fenv_sus = 0.0f;
       v->amp_kd = expf(-6.9f / (0.3f * exp2f(v->p[TA_HOLD] * 3.7f) * SR));  /* 0.3 .. 4 s while held */
       v->amp_kr = expf(-6.9f / (0.016f * SR));
-      v->fenv_krb = v->fenv_kb;                                              /* the filter's carries on */
+      v->fenv_krb = 0.0f;                                                    /* unused: the filter's carries on */
     }
   }
   if (what & D_CAP) v->cap_kb = expf(-fn / ((0.02f + 0.12f * v->p[TA_RES]) * SR));
@@ -168,7 +168,7 @@ void ta_render_mix(ta_voice *restrict v, float *restrict out, unsigned n, float 
        envelope, the accent capacitor and the duck run on at their own rates: a 303's gate is
        half a step, and accents stack across the gap. */
     v->s1 = v->s2 = v->s3 = v->s4 = v->hp = v->x1 = 0.0f; v->amp = 0.0f;
-    v->fenv *= v->fenv_krb;
+    v->fenv *= ROWS[v->chr].adsr ? v->fenv_krb : (v->accented ? v->fenv_kb_acc : v->fenv_kb);
     v->cap = (v->accented && ROWS[v->chr].acc_oct > 0.0f ? v->fenv : 0.0f) * (1.0f - v->cap_kb) + v->cap * v->cap_kb;
     v->duck *= v->duck_kb;
     return;
@@ -185,7 +185,7 @@ void ta_render_mix(ta_voice *restrict v, float *restrict out, unsigned n, float 
   const int32_t dinc = ((int32_t)inc1 - (int32_t)inc) / (int32_t)n;        /* both are under 2^30 */
 
   const int held = v->gate || !r->adsr;
-  if (held) v->fenv = v->fenv_sus + (v->fenv - v->fenv_sus) * v->fenv_kb;
+  if (held) v->fenv = v->fenv_sus + (v->fenv - v->fenv_sus) * (v->accented ? v->fenv_kb_acc : v->fenv_kb);
   else v->fenv *= v->fenv_krb;
   const float cap_in = (v->accented && r->acc_oct > 0.0f) ? v->fenv : 0.0f;
   v->cap = cap_in + (v->cap - cap_in) * v->cap_kb;
