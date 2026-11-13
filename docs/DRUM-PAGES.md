@@ -123,8 +123,41 @@ to off. The row shows the pattern's number in binary (T1 the low bit) over a hal
 - **The kick ducks its cutoff**: each hit on slot 1 dips it (`duck` in drums.cnfg, half an
   octave) and it comes back over about a tenth of a second.
 - The pattern is kept in the PRST slot by name (`bass = campfire`).
-- Not yet: pages for the lanes' densities and lengths (drums.cnfg has them), snap back,
-  recorded fader moves, rests from the rocker.
+- Not yet: pages for the lanes' densities and lengths (drums.cnfg has them), rests from the
+  rocker.
+
+### Fader moves: keep, undo, add, snap back
+
+The kit always remembers **the last bar** of the four sound faders (cutoff, resonance, decay,
+drive; 64 points a bar), so there is nothing to arm: play a move, and if it was good, keep it.
+On **SETTINGS, while an acid pattern plays, the rocker without `••`** is:
+
+| | |
+|---|---|
+| **FFWD tap** | **keep**: the last bar of fader moves becomes a *take* and loops from now on. Up to four takes stack. The row shows how many |
+| **RWD tap** | **undo**: the newest take goes |
+| **FFWD held 0.6 s** | **add**: what plays now (the faders and the takes) is *home* |
+| **RWD held 0.6 s** | **snap back**: at the next bar line the four faders return to home and the takes made since go. If nothing has changed since home was set, it goes to the home before it (four deep) |
+
+- A take is stored **relative to where the faders stood when you kept it**, so it rides under
+  the hand: keep a sweep, then move the fader and the whole sweep moves with it.
+- Home starts as the pattern's own sound (or the preset's, after a load). Stepping to another
+  pattern drops the takes and starts a new home.
+- After a snap back the faders catch up from home, as after any page change.
+- Takes are not saved in the PRST slot, and nothing is kept while the clock is stopped.
+- The rest style (choke / ring out), which this rocker sets otherwise, is drums.cnfg's
+  `rest_style` while an acid pattern plays.
+
+What it is for (`drumtest` renders each as `jam*.wav`):
+
+1. **Sweep and keep** — play a cutoff sweep over one bar, keep it, take your hand away: it
+   loops. Flick the resonance on the off-beats for a bar, keep that too; undo it; snap back.
+2. **Stabs under the hand** — keep a bar of filter stabs with the fader left low, then raise
+   the fader slowly: the loop plays the rhythm, the hand plays the level.
+3. **Breathing** — one slow swell of cutoff and decay over a bar of a held line, kept, and the
+   line breathes the same way every bar while you work on the drums.
+4. **Build and drop** — keep a closing-filter bar, push drive and resonance up by hand for
+   four bars, then hold RWD: on the bar line everything is home again at once.
 
 **A pattern as text** — one token per 16th, up to 32:
 
@@ -383,17 +416,19 @@ tinyacid are not among the engines the model was fitted to, so read these as ±7
 | four drums, bass off | 29.6 % | 51.3 % |
 | kick + hat | 27.7 % | 42.8 % |
 | kick + hat + the old bass on the Y clock | 28.5 % | 52.4 % |
-| kick + hat + acid-home (303) | 42.8 % | 66.5 % |
-| kick + hat + campfire (101: pulse, sub, noise) | 53.3 % | 68.8 % |
-| kick + hat + crawl (303: sub, filter FM, drive) | 40.3 % | 73.5 % |
-| four drums + crawl | 42.2 % | 81.5 % |
-| four drums + crawl + all four bus FX | 60.0 % | 99.2 % |
+| kick + hat + acid-home (303) | 44.0 % | 67.3 % |
+| kick + hat + campfire (101: pulse, sub, noise) | 54.6 % | 70.0 % |
+| kick + hat + crawl (303: sub, filter FM, drive) | 41.6 % | 74.7 % |
+| four drums + crawl | 43.4 % | 82.7 % |
+| four drums + crawl + all four bus FX | 61.2 % | 100.5 % |
 
-So the line costs about 15 points over a kick and a hat as a 303 and about 25 as the 101 with
-its long gates, and the one workload that reaches the budget is everything at once. tinyacid
+So the line costs about 16 points over a kick and a hat as a 303 and about 27 as the 101 with
+its long gates (a point of that is the fader recording, which runs whether or not a take is
+kept), and the one workload that reaches the budget is everything at once. tinyacid
 alone is 218-274 instructions a sample under Callgrind on x86-64 (`acidbench.c`; tinybass is
 124). Built with `-DTA_OS=1` (the ladder once a sample instead of twice) the same eight rows
-are 3-6 points lower (the last: 57.8 % / 93.7 %). Not measured on an SP-1.
+were 3-6 points lower when measured before the fader recording went in (the last row then:
+57.8 % / 93.7 % against 60.0 % / 99.2 %). Not measured on an SP-1.
 
 The modal kits (modal gamelan, iron vibes) peak highest, when four voices are struck on the
 same 16th. Wakes queues one block, so a single block over budget is absorbed without a

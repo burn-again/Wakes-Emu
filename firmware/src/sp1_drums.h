@@ -85,6 +85,9 @@ struct sp1_drums_status {
 	uint32_t hits;            /* voices struck since boot                          */
 	uint32_t bass_notes;      /* bass notes since boot                             */
 	uint32_t shed;            /* tails faded by the CPU guard since boot           */
+	uint8_t  acid_takes;      /* recorded fader takes looping now, 0..4            */
+	float    acid_now[4];     /* cutoff, resonance, decay, drive as the voice has   */
+	                          /* them this block: the faders plus the takes         */
 };
 void sp1_drums_status(struct sp1_drums_status *out);
 /* Audio thread, after each DMA block: the drum render's cycles for `frames` samples. Above

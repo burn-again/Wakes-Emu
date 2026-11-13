@@ -332,9 +332,43 @@ int main(int argc, char** argv) {
       }
       snprintf(what, sizeof what, "the kick ducks the cutoff: the bar differs by %.0f in all", diff); check(diff > 1000.0, what);
     }
-    // ---- every pattern over kick and hat, at its own tempo, for the ears: 8 bars each, the
-    // second four with the cutoff up a little and every lane's density at 1 ----
-    for (int i = 0; i < SP1_ACID_BUILTIN; ++i) {
+    // ---- recorded fader moves: the last bar becomes a take that loops under the hand ----
+    { sp1_drums_init(); fresh(p, 0, 0x0); acid(0);
+      Clock c(5u);
+      auto bar = [&](float from, float to, float at) {      // one bar, the cutoff fader moving; -> its value `at` of the way through
+        float seen = -1.0f;
+        for (int i = 0; i < kBar; ++i) {
+          p.drums.acid_p[0] = from + (to - from) * (float)i / (float)kBar;
+          sp1_drums_frame f = c.next(); sp1_drums_begin(&p); sp1_drums_render(&f, out, 24);
+          if (i == (int)(at * kBar)) seen = st().acid_now[0];
+        }
+        return seen;
+      };
+      bar(0.3f, 0.3f, 0.5f);
+      bar(0.2f, 0.8f, 0.5f);                                 // the hand sweeps up over a bar...
+      p.drums.acid_p[0] = 0.8f; p.drums.acid_keep_seq++;     // ...rests at the top, and keeps it
+      const float lo = bar(0.8f, 0.8f, 0.125f), hi = bar(0.8f, 0.8f, 0.875f);
+      snprintf(what, sizeof what, "keep: the sweep loops with the fader still -- %.3f an eighth in, %.3f near the end (want 0.275, 0.725), %d take",
+               lo, hi, st().acid_takes);
+      check(fabsf(lo - 0.275f) < 0.03f && fabsf(hi - 0.725f) < 0.03f && st().acid_takes == 1, what);
+      const float under = bar(0.5f, 0.5f, 0.875f);
+      snprintf(what, sizeof what, "the take rides under the hand: fader at 0.5 -> %.3f near the end (want 0.425)", under);
+      check(fabsf(under - 0.425f) < 0.03f, what);
+      p.drums.acid_undo_seq++;
+      const float flat = bar(0.5f, 0.5f, 0.125f);
+      check(flat == 0.5f && st().acid_takes == 0, "undo: the take is gone, the fader alone again");
+      for (int k = 0; k < 6; ++k) { p.drums.acid_keep_seq++; run(c, p, 4); }
+      check(st().acid_takes == 4, "six keeps: four takes, no more");
+      p.drums.acid_snap_to = 1; p.drums.acid_snap_seq++; run(c, p, 4);
+      check(st().acid_takes == 1, "snap back to one take");
+      acid(2); run(c, p, 4);
+      check(st().acid_takes == 0, "another pattern: its takes go");
+      c.running = false; run(c, p, 8); p.drums.acid_keep_seq++; run(c, p, 4);
+      check(st().acid_takes == 0, "stopped: there is no bar to keep");
+    }
+    // ---- for the ears: each pattern over a kick and a hat at its own tempo. `script` is the
+    // hands: called every block with the position in bars, it moves the controls. ----
+    auto render = [&](const char* name, int i, int bars, void (*script)(float, sp1_drums_ctl&), int want_takes) {
       const struct sp1_acid_preset* ap = sp1_acid_preset(i);
       sp1_drums_init();
       fresh(p, 4, 0x5);                                   // dub techno: its kick and its tambourine
@@ -342,16 +376,13 @@ int main(int argc, char** argv) {
       p.drums.fx_on = 0x0F; for (int k = 0; k < 4; ++k) p.drums.fx[k] = ap->fx[k];
       p.drums.fm_hz = 196.0f;
       const unsigned per_beat = (unsigned)(48000.0f * 60.0f / ap->bpm / 24.0f + 0.5f);   // blocks
-      const unsigned blocks = per_beat * 32u;
-      static int16_t pcm[48000 * 24];
+      const unsigned blocks = per_beat * 4u * (unsigned)bars;
+      static int16_t pcm[48000 * 40];
       int peak = 0, clipped = 0, nans = 0; double sumsq = 0; uint8_t prev = 0;
       const uint32_t n0 = st().bass_notes;
       float volts[4] = {0, 0, 0, 0};
       for (unsigned b = 0; b < blocks && (b + 1) * 24 <= sizeof pcm / 2; ++b) {
-        if (b == blocks / 2) {
-          p.drums.acid_p[0] += 0.12f;
-          for (int l = 0; l < 4; ++l) p.drums.acid_dens[l] = 1.0f;
-        }
+        script((float)b / (float)(per_beat * 4u), p.drums);
         const unsigned phase = b % per_beat;
         const uint8_t gates = phase < per_beat / 4 ? 3u : 0u;
         sp1_drums_frame f; f.rise = gates & (uint8_t)~prev; prev = gates; f.volts = volts;
@@ -363,13 +394,69 @@ int main(int argc, char** argv) {
           pcm[b * 24 + k] = (int16_t)v; sumsq += (double)v * v; if (abs(v) > peak) peak = abs(v);
         }
       }
-      snprintf(what, sizeof what, "acid %d %-14s %3.0f bpm  %3u notes  peak %5d  rms %6.1f dBFS  clipped %d  nan %d", i + 1,
-               ap->name, ap->bpm, st().bass_notes - n0, peak, 20 * log10(sqrt(sumsq / (blocks * 24.0)) / 32768.0 + 1e-12),
-               clipped, nans);
-      check(nans == 0 && clipped == 0 && peak > 3000 && st().bass_notes - n0 > 20, what);
-      char path[256]; snprintf(path, sizeof path, "%s/acid%d_%s.wav", dir, i + 1, ap->name);
+      snprintf(what, sizeof what, "%-22s %-13s %3.0f bpm %2d bars %3u notes  peak %5d  rms %6.1f dBFS  clipped %d  nan %d  takes %d",
+               name, ap->name, ap->bpm, bars, st().bass_notes - n0, peak,
+               20 * log10(sqrt(sumsq / (blocks * 24.0)) / 32768.0 + 1e-12), clipped, nans, st().acid_takes);
+      check(nans == 0 && clipped == 0 && peak > 3000 && st().bass_notes - n0 > 20 && st().acid_takes == want_takes, what);
+      char path[256]; snprintf(path, sizeof path, "%s/%s.wav", dir, name);
       wav(path, pcm, blocks * 24);
+    };
+    // The patterns as written for four bars, then the cutoff up a little and every lane at 1.
+    for (int i = 0; i < SP1_ACID_BUILTIN; ++i) {
+      char name[64]; snprintf(name, sizeof name, "acid%d_%s", i + 1, sp1_acid_preset(i)->name);
+      static float base; base = sp1_acid_preset(i)->p[0];
+      render(name, i, 8, [](float bar, sp1_drums_ctl& d) {
+        if (bar >= 4.0f) { d.acid_p[0] = base + 0.12f; for (int l = 0; l < 4; ++l) d.acid_dens[l] = 1.0f; }
+      }, 0);
     }
+    // ---- the faders moving: four ways to use keep, undo and snap back ----
+    // The scripts do what the SETTINGS page does: move cutoff [0], resonance [1], decay [3],
+    // drive [5], and count up the keep / undo / snap counters once at a bar line.
+    #define ONCE(at, what_) do { static int done_; if (bar < 0.01f) done_ = 0; if (bar >= (at) && !done_) { done_ = 1; what_; } } while (0)
+    // 1. acid-home. A sweep you play once and keep; a second take on top; undo it; snap back.
+    render("jam1_sweep-and-keep", 0, 12, [](float bar, sp1_drums_ctl& d) {
+      const float in = bar - floorf(bar);
+      if (bar >= 2.0f && bar < 3.0f) d.acid_p[0] = 0.20f + 0.55f * in;          // bar 3: the hand sweeps the cutoff up
+      ONCE(3.0f, { d.acid_p[0] = 0.75f; d.acid_keep_seq++; });                   // keep: it loops, hands off (bars 4-6)
+      if (bar >= 6.0f && bar < 7.0f) d.acid_p[1] = ((int)(in * 8.0f) & 1) ? 0.97f : 0.60f;   // bar 7: resonance flicked on the off-8ths
+      ONCE(7.0f, { d.acid_p[1] = 0.60f; d.acid_keep_seq++; });                   // keep: two takes loop (bars 8-9)
+      ONCE(9.0f, d.acid_undo_seq++);                                             // undo: the resonance take goes (bar 10)
+      ONCE(10.0f, { d.acid_p[0] = 0.32f; d.acid_p[1] = 0.75f; d.acid_snap_to = 0; d.acid_snap_seq++; });   // snap back: home (bars 11-12)
+    }, 0);
+    // 2. octave-hopper. Filter stabs kept as a rhythm, then the hand lifts the whole thing:
+    //    the take rides under the fader, so one hand plays the level and the loop plays the shape.
+    render("jam2_stabs-under-hand", 3, 10, [](float bar, sp1_drums_ctl& d) {
+      const float in = bar - floorf(bar);
+      if (bar >= 1.0f && bar < 2.0f) d.acid_p[0] = ((int)(in * 16.0f) % 4 == 2) ? 0.75f : 0.15f;   // bar 2: open on each off-beat 16th
+      ONCE(2.0f, { d.acid_p[0] = 0.15f; d.acid_keep_seq++; });                   // keep, the fader left low (bars 3-4)
+      if (bar >= 4.0f && bar < 8.0f) d.acid_p[0] = 0.15f + 0.40f * (bar - 4.0f) / 4.0f;   // bars 5-8: the hand rises slowly under the stabs
+      ONCE(8.0f, { d.acid_p[0] = 0.40f; d.acid_snap_to = 0; d.acid_snap_seq++; });   // snap back to the pattern's own cutoff (bars 9-10)
+    }, 0);
+    // 3. campfire. A slow breath on cutoff and decay over one bar, kept: the pad-like line swells
+    //    the same way every bar while you do something else.
+    render("jam3_breathing", 1, 8, [](float bar, sp1_drums_ctl& d) {
+      const float in = bar - floorf(bar);
+      if (bar >= 2.0f && bar < 3.0f) {
+        const float s = sinf(3.14159265f * in);                                  // up to the middle of the bar and back
+        d.acid_p[0] = 0.30f + 0.30f * s;
+        d.acid_p[3] = 0.75f - 0.40f * s;                                         // shorter decay as it opens
+      }
+      ONCE(3.0f, { d.acid_p[0] = 0.30f; d.acid_p[3] = 0.75f; d.acid_keep_seq++; });   // keep; bars 4-8 breathe on their own
+    }, 1);
+    // 4. crawl. A build and a drop: keep a closing-filter bar, push the drive up by hand over four
+    //    bars with the loop running, then snap back on the bar line -- everything drops to home at once.
+    render("jam4_build-and-drop", 5, 12, [](float bar, sp1_drums_ctl& d) {
+      const float in = bar - floorf(bar);
+      if (bar >= 1.0f && bar < 2.0f) d.acid_p[0] = 0.55f - 0.33f * in;           // bar 2: the cutoff closes over the bar
+      ONCE(2.0f, { d.acid_p[0] = 0.22f; d.acid_keep_seq++; });                   // keep (rests closed): each bar now opens and closes
+      if (bar >= 4.0f && bar < 8.0f) {                                           // bars 5-8: the build, by hand
+        d.acid_p[5] = 0.30f + 0.70f * (bar - 4.0f) / 4.0f;                       // drive up
+        d.acid_p[1] = 0.65f + 0.30f * (bar - 4.0f) / 4.0f;                       // resonance up
+        d.acid_p[0] = 0.22f + 0.25f * (bar - 4.0f) / 4.0f;                       // cutoff up under the loop
+      }
+      ONCE(8.0f, { d.acid_p[0] = 0.22f; d.acid_p[1] = 0.65f; d.acid_p[5] = 0.80f; d.acid_snap_to = 0; d.acid_snap_seq++; });   // the drop
+    }, 0);
+    #undef ONCE
     // ---- the preset's word and drums.cnfg's [acid] ----
     { struct sp1_drums_cfg c; struct sp1_drums_cfg_reader r;
       const char* t = "[bass]\nmode = crawl\n[acid]\nlevel = -9\nduck = 1.5\ntranspose = -12\nslide_density = 1\n"

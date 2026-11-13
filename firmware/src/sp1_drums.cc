@@ -180,6 +180,19 @@ sp1_acid_seq aseq;
 bool acid_pend;                            // this step's event has not been played yet
 sp1_acid_event acid_ev;
 float acid_at, acid_off_at;                // where in the step it plays / its gate falls (< 0: no fall)
+// Its recorded fader moves: 64 points a bar (four per 16th) for cutoff, resonance, decay and
+// drive. mot_rec is always the last bar of the faders themselves; a take is that bar less
+// where the faders stood when it was kept, so it plays as an offset under the hand.
+constexpr int kMotN = 64, kMotTakes = 4;
+constexpr int kMotParam[4] = {TA_CUTOFF, TA_RES, TA_DECAY, TA_DRIVE};
+float mot_rec[kMotN][4];
+float mot_take[kMotTakes][kMotN][4];
+int mot_takes, mot_last = -1;
+bool mot_fill = true;                      // the record holds nothing yet: fill it with the faders
+uint32_t keep_seen, undo_seen, snap_seen;
+uint8_t acid_mode_was;
+volatile uint8_t st_takes;
+volatile float st_acid_now[4];
 int fade_left[SP1_DRUMS_N];                // samples left in a choke fade; 0 = none
 
 // ---- where we are: 16ths since PLAY, off Marbles' master ramp ----
@@ -598,9 +611,18 @@ extern "C" void sp1_drums_begin(const sp1_synth_params* c) {
   for (int i = 0; i < TB_NPARAM && i < 8; ++i) tb_set(&bass, static_cast<unsigned>(i), Clamp01(ctl.bass_p[i]));
   if (AcidOn()) {
     ta_character(&acid, ctl.acid_chr);
-    for (int i = 0; i < TA_NPARAM; ++i) ta_set(&acid, static_cast<unsigned>(i), Clamp01(ctl.acid_p[i]));
+    for (int i = 0; i < TA_NPARAM; ++i) {
+      // the four with recorded moves are set in the render, where the bar's position is known
+      if (i == TA_CUTOFF || i == TA_RES || i == TA_DECAY || i == TA_DRIVE) continue;
+      ta_set(&acid, static_cast<unsigned>(i), Clamp01(ctl.acid_p[i]));
+    }
   } else if (acid.gate) {
     ta_gate_off(&acid);                // the mode was left with a note held
+  }
+  if (ctl.bass_mode != acid_mode_was) {  // another pattern, or out of the acid line: its takes go
+    acid_mode_was = ctl.bass_mode;
+    mot_takes = 0;
+    mot_fill = true;
   }
   ApplyFx();
   // The CPU guard: when the last block's render took over kShedAt of its budget, fade the
@@ -686,6 +708,7 @@ extern "C" void sp1_drums_render(const sp1_drums_frame* f, float* out, uint32_t 
     t2_count = 0u;
     for (float& p : pend_vel) p = 0.0f;
     sp1_acid_seq_reset(&aseq);
+    mot_fill = true;
   }
   if (!running && was_running) {                       // stopped: the line lets go
     ta_gate_off(&acid);
@@ -851,6 +874,58 @@ extern "C" void sp1_drums_render(const sp1_drums_frame* f, float* out, uint32_t 
       }
     }
   }
+  // The acid line's faders: record the hand, play the takes under it.
+  if (AcidOn()) {
+    float live[4], now[4];
+    for (int k = 0; k < 4; ++k) now[k] = live[k] = Clamp01(ctl.acid_p[kMotParam[k]]);
+    int pos = -1;
+    float frac = 0.0f;
+    if (running && g16 >= 0) {
+      float into = f->ramp * 4.0f - static_cast<float>(last_q);
+      into = into < 0.0f ? 0.0f : (into > 0.999f ? 0.999f : into);
+      const int sub = static_cast<int>(into * 4.0f);
+      frac = into * 4.0f - static_cast<float>(sub);
+      pos = static_cast<int>(g16 & 15) * 4 + sub;
+      if (mot_fill) {
+        for (int i = 0; i < kMotN; ++i) for (int k = 0; k < 4; ++k) mot_rec[i][k] = live[k];
+        mot_fill = false;
+        mot_last = pos;
+      }
+      // every point passed since the last block takes the faders as they are now
+      for (int n = 0; mot_last != pos && n < kMotN; ++n) {
+        mot_last = (mot_last + 1) % kMotN;
+        for (int k = 0; k < 4; ++k) mot_rec[mot_last][k] = live[k];
+      }
+      for (int k = 0; k < 4; ++k) mot_rec[pos][k] = live[k];
+    }
+    if (ctl.acid_keep_seq != keep_seen) {
+      keep_seen = ctl.acid_keep_seq;
+      if (pos >= 0 && mot_takes < kMotTakes) {
+        for (int i = 0; i < kMotN; ++i) for (int k = 0; k < 4; ++k) mot_take[mot_takes][i][k] = mot_rec[i][k] - live[k];
+        ++mot_takes;
+      }
+    }
+    if (ctl.acid_undo_seq != undo_seen) {
+      undo_seen = ctl.acid_undo_seq;
+      if (mot_takes > 0) --mot_takes;
+    }
+    if (ctl.acid_snap_seq != snap_seen) {
+      snap_seen = ctl.acid_snap_seq;
+      if (ctl.acid_snap_to < mot_takes) mot_takes = ctl.acid_snap_to;
+    }
+    if (pos >= 0) {
+      const int nx = (pos + 1) % kMotN;
+      for (int t = 0; t < mot_takes; ++t) {
+        for (int k = 0; k < 4; ++k) now[k] += mot_take[t][pos][k] + (mot_take[t][nx][k] - mot_take[t][pos][k]) * frac;
+      }
+    }
+    for (int k = 0; k < 4; ++k) {
+      now[k] = Clamp01(now[k]);
+      ta_set(&acid, static_cast<unsigned>(kMotParam[k]), now[k]);
+      st_acid_now[k] = now[k];
+    }
+    st_takes = static_cast<uint8_t>(mot_takes);
+  }
   // The acid line's note lands at its moment in the step (late on a swung 16th), and its
   // gate falls part-way through unless a slide or a tie follows.
   if (running && AcidOn() && (acid_pend || acid_off_at >= 0.0f)) {
@@ -967,4 +1042,6 @@ extern "C" void sp1_drums_status(struct sp1_drums_status* out) {
   out->hits = st_hits;
   out->bass_notes = st_bass;
   out->shed = st_shed;
+  out->acid_takes = st_takes;
+  for (int k = 0; k < 4; ++k) out->acid_now[k] = st_acid_now[k];
 }

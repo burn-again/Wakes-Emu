@@ -68,6 +68,10 @@ static inline ta_coef coef(float g, float pole1, float k) {
   return c;
 }
 
+/* v->dirty: which of ta_update's rates a change has made stale. Cutoff, drive and the mixer
+   are read straight from p[] each block, so a fader sweeping them costs no libm at all. */
+enum { D_ENV = 1, D_CAP = 2, D_GLIDE = 4, D_ALL = 7 };
+
 void ta_init(ta_voice *v) {
   memset(v, 0, sizeof *v);
   v->p[TA_CUTOFF] = 0.35f; v->p[TA_RES] = 0.6f; v->p[TA_ENVMOD] = 0.5f; v->p[TA_DECAY] = 0.3f;
@@ -75,17 +79,21 @@ void ta_init(ta_voice *v) {
   v->note = v->target = 36.0f;
   v->rng = 0x2545F491u;
   v->accg = v->accg_t = 1.0f;
-  v->dirty = 1;
+  v->dirty = D_ALL;
 }
 
 void ta_character(ta_voice *v, unsigned chr) {
-  if (chr < TA_NCHAR && chr != v->chr) { v->chr = (uint8_t)chr; v->dirty = 1; }
+  if (chr < TA_NCHAR && chr != v->chr) { v->chr = (uint8_t)chr; v->dirty = D_ALL; }
 }
 
 void ta_set(ta_voice *v, unsigned k, float x) {
   if (k >= TA_NPARAM) return;
   x = clampf(x, 0.0f, 1.0f);
-  if (x != v->p[k]) { v->p[k] = x; v->dirty = 1; }
+  if (x == v->p[k]) return;
+  v->p[k] = x;
+  if (k == TA_DECAY || k == TA_HOLD) v->dirty |= D_ENV;
+  else if (k == TA_RES) v->dirty |= D_CAP;
+  else if (k == TA_SLIDE) v->dirty |= D_GLIDE;
 }
 
 int ta_active(const ta_voice *v) { return v->gate || v->att || v->amp > 1e-4f; }
@@ -96,7 +104,7 @@ void ta_note(ta_voice *v, float note, unsigned flags) {
   const int sounding = v->gate && v->amp > 0.02f;
   const int acc = (flags & TA_F_ACCENT) != 0;
   v->target = clampf(note, 0.0f, 127.0f);
-  if (acc != v->accented) { v->accented = (uint8_t)acc; v->dirty = 1; }
+  if (acc != v->accented) { v->accented = (uint8_t)acc; v->dirty |= D_ENV; }
   v->accg_t = 1.0f + (acc ? v->p[TA_ACCENT] * r->acc_amp : 0.0f);
   v->gate = 1;
   if ((flags & TA_F_SLIDE) && sounding) return;     /* legato: the envelopes carry on, the pitch glides */
@@ -113,25 +121,28 @@ void ta_duck(ta_voice *v, float oct) { v->duck = clampf(v->duck + oct, 0.0f, 6.0
 static void ta_update(ta_voice *v, unsigned n) {
   const ta_row *r = &ROWS[v->chr];
   const float fn = (float)n;
-  /* times are to -60 dB, so tau = T / 6.9 */
-  const float dec = 0.2f * exp2f(v->p[TA_DECAY] * 3.65f);                 /* 0.2 .. 2.5 s */
-  const float fdec = (v->accented && !r->adsr) ? 0.2f : dec;
-  v->fenv_kb = expf(-6.9f * fn / (fdec * SR));
-  v->atk_step = 1.0f / ((r->adsr ? 0.0015f : 0.003f) * SR);
-  if (r->adsr) {
-    v->amp_sus = v->fenv_sus = v->p[TA_HOLD];
-    v->amp_kd = expf(-6.9f / (dec * SR));
-    v->amp_kr = expf(-6.9f / (dec * 0.6f * SR));
-    v->fenv_krb = expf(-6.9f * fn / (dec * 0.6f * SR));
-  } else {
-    v->amp_sus = v->fenv_sus = 0.0f;
-    v->amp_kd = expf(-6.9f / (0.3f * exp2f(v->p[TA_HOLD] * 3.7f) * SR));  /* 0.3 .. 4 s while held */
-    v->amp_kr = expf(-6.9f / (0.016f * SR));
-    v->fenv_krb = v->fenv_kb;                                              /* the filter's carries on */
+  const unsigned what = n != v->blk_n ? (unsigned)D_ALL : v->dirty;
+  if (what & D_ENV) {
+    /* times are to -60 dB, so tau = T / 6.9 */
+    const float dec = 0.2f * exp2f(v->p[TA_DECAY] * 3.65f);                 /* 0.2 .. 2.5 s */
+    const float fdec = (v->accented && !r->adsr) ? 0.2f : dec;
+    v->fenv_kb = expf(-6.9f * fn / (fdec * SR));
+    v->atk_step = 1.0f / ((r->adsr ? 0.0015f : 0.003f) * SR);
+    if (r->adsr) {
+      v->amp_sus = v->fenv_sus = v->p[TA_HOLD];
+      v->amp_kd = expf(-6.9f / (dec * SR));
+      v->amp_kr = expf(-6.9f / (dec * 0.6f * SR));
+      v->fenv_krb = expf(-6.9f * fn / (dec * 0.6f * SR));
+    } else {
+      v->amp_sus = v->fenv_sus = 0.0f;
+      v->amp_kd = expf(-6.9f / (0.3f * exp2f(v->p[TA_HOLD] * 3.7f) * SR));  /* 0.3 .. 4 s while held */
+      v->amp_kr = expf(-6.9f / (0.016f * SR));
+      v->fenv_krb = v->fenv_kb;                                              /* the filter's carries on */
+    }
   }
-  v->cap_kb = expf(-fn / ((0.02f + 0.12f * v->p[TA_RES]) * SR));
-  v->duck_kb = expf(-fn / (0.12f * SR));
-  v->glide_kb = expf(-fn / (0.015f * exp2f(v->p[TA_SLIDE] * 4.0f) * SR)); /* tau 15 .. 240 ms */
+  if (what & D_CAP) v->cap_kb = expf(-fn / ((0.02f + 0.12f * v->p[TA_RES]) * SR));
+  if (what & D_GLIDE) v->glide_kb = expf(-fn / (0.015f * exp2f(v->p[TA_SLIDE] * 4.0f) * SR)); /* tau 15 .. 240 ms */
+  if (n != v->blk_n) v->duck_kb = expf(-fn / (0.12f * SR));
   v->blk_n = n;
   v->dirty = 0;
 }

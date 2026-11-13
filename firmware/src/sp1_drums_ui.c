@@ -71,6 +71,18 @@ static uint8_t  rest_clear;
 static uint8_t  rest_write, rest_erase;
 static bool     ffwd_eaten, rwd_eaten;   /* pressed with "••", or on a page where it is a key */
 static uint32_t ffwd_ms;
+/* The acid line's performance (SETTINGS, the rocker): home is where snap back returns the four
+ * sound faders and how many takes it keeps; add pushes a new one, up to ACID_HOMES deep. */
+#define ACID_HOMES   4
+#define ACID_HOLD_MS 600u            /* the rocker held this long: add (FFWD) / snap back (RWD) */
+static float    acid_home[ACID_HOMES][4];
+static uint8_t  acid_home_takes[ACID_HOMES];
+static int      acid_homes;          /* 0: not set yet (a preset was loaded, the mode stepped) */
+static uint32_t acid_ff_ms, acid_rw_ms;
+static bool     acid_ff_done, acid_rw_done, acid_snap_pending;
+static int8_t   acid_step_was = -1;
+static uint32_t acid_keep_seq, acid_undo_seq, acid_snap_seq;
+static uint8_t  acid_snap_to;
 static bool     burst;
 static float    speed = 1.0f;
 static uint8_t  audition;
@@ -205,6 +217,7 @@ void sp1_dui_load_kit(int k)
 
 static void defaults(int k)
 {
+	acid_homes = 0;
 	sp1_drums_patch_default(&pt, k);
 	pt.rest_choke = (uint8_t)(cfg.rest_choke ? 1 : 0);
 	pt.bass_mode = (uint8_t)cfg.bass_mode;
@@ -251,6 +264,8 @@ void sp1_dui_put(const struct sp1_drums_patch *p)
 		return;                       /* a slot with no drums: they stay as they are */
 	}
 	pt = *p;
+	acid_homes = 0;                   /* the preset's sound is home */
+	acid_snap_pending = false;
 	pickup_all();
 }
 
@@ -663,6 +678,8 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 			model_step(dn, dir);
 		} else if (on_set) {
 			const bool was_acid = pt.bass_mode >= SP1_BASS_ACID;
+			acid_homes = 0;                       /* a new pattern: its own sound is home */
+			acid_snap_pending = false;
 			pt.bass_mode = (uint8_t)((pt.bass_mode + (dir > 0 ? 1 : SP1_BASS_MODES - 1)) %
 						 SP1_BASS_MODES);
 			if (pt.bass_mode >= SP1_BASS_ACID) {
@@ -712,8 +729,111 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 		ffwd_ms += dt;
 	}
 
-	/* ---- SETTINGS: the rest style ---- */
-	if (on_set && !fnc && (ffwd_press || rwd_press)) {
+	/* ---- SETTINGS with the acid line: the rocker keeps, undoes, adds and snaps back ----
+	 * FFWD tap: keep -- the last bar of fader moves loops from now on (a take, up to four).
+	 * RWD tap: undo the newest take.   FFWD held: add -- what plays now is home.
+	 * RWD held: snap back -- at the next bar line the faders return to home and the takes
+	 * made since go; when nothing has changed since, to the home before it. */
+	const bool acid = pt.bass_mode >= SP1_BASS_ACID && pt.bass_mode < SP1_BASS_MODES;
+	if (acid) {
+		struct sp1_drums_status st;
+		sp1_drums_status(&st);
+		const int takes = st.acid_takes;
+		if (acid_homes == 0) {
+			memcpy(acid_home[0], stored[L_SET_SH], sizeof acid_home[0]);
+			acid_home_takes[0] = (uint8_t)takes;
+			acid_homes = 1;
+		}
+		if (on_set && !fnc) {
+			if (ffwd_press) {
+				acid_ff_ms = 0u;
+				acid_ff_done = false;
+			}
+			if (rwd_press) {
+				acid_rw_ms = 0u;
+				acid_rw_done = false;
+			}
+			if (ffwd_down && !acid_ff_done) {
+				acid_ff_ms += dt;
+				if (acid_ff_ms >= ACID_HOLD_MS) {         /* add */
+					acid_ff_done = true;
+					if (acid_homes == ACID_HOMES) {       /* the oldest home goes */
+						memmove(acid_home[0], acid_home[1], sizeof acid_home[0] * (ACID_HOMES - 1));
+						memmove(&acid_home_takes[0], &acid_home_takes[1], ACID_HOMES - 1);
+						acid_homes--;
+					}
+					memcpy(acid_home[acid_homes], stored[L_SET_SH], sizeof acid_home[0]);
+					acid_home_takes[acid_homes] = (uint8_t)takes;
+					acid_homes++;
+					const uint8_t lv[4] = { SP1_ENGINE_LED_FULL, SP1_ENGINE_LED_FULL,
+								SP1_ENGINE_LED_FULL, SP1_ENGINE_LED_FULL };
+					flash(lv);
+					LOG("ACID add: this is home now (%d take%s, %d home%s deep)\n", takes,
+					    takes == 1 ? "" : "s", acid_homes, acid_homes == 1 ? "" : "s");
+				}
+			}
+			if (rwd_down && !acid_rw_done) {
+				acid_rw_ms += dt;
+				if (acid_rw_ms >= ACID_HOLD_MS) {         /* snap back, at the bar */
+					acid_rw_done = true;
+					acid_snap_pending = true;
+					LOG("ACID snap back at the bar\n");
+				}
+			}
+			if ((k->released & BIT(SP1_BTN_FFWD)) && !acid_ff_done) {       /* keep */
+				uint8_t lv[4];
+				if (!run) {
+					LOG("ACID keep: nothing to keep while the clock is stopped\n");
+				} else if (takes >= 4) {
+					LOG("ACID keep: four takes already (RWD undoes one)\n");
+				} else {
+					acid_keep_seq++;
+					mask_glyph((uint8_t)((1u << (takes + 1)) - 1u), lv);
+					flash(lv);
+					LOG("ACID keep: the last bar of fader moves loops (take %d)\n", takes + 1);
+				}
+			}
+			if ((k->released & BIT(SP1_BTN_RWD)) && !acid_rw_done) {        /* undo */
+				uint8_t lv[4];
+				if (takes == 0) {
+					LOG("ACID undo: no take to undo\n");
+				} else {
+					acid_undo_seq++;
+					mask_glyph((uint8_t)((1u << (takes - 1)) - 1u), lv);
+					flash(lv);
+					LOG("ACID undo: take %d gone, %d left\n", takes, takes - 1);
+				}
+			}
+		}
+		/* A snap back lands on the bar line (or at once while stopped), wherever the page is. */
+		if (acid_snap_pending && (st.step < 0 || (st.step == 0 && acid_step_was != 0))) {
+			acid_snap_pending = false;
+			int top = acid_homes - 1;
+			bool same = takes == acid_home_takes[top];
+			for (int i = 0; i < 4; i++) {
+				const float d = stored[L_SET_SH][i] - acid_home[top][i];
+				same = same && d > -0.004f && d < 0.004f;
+			}
+			const bool before = same && top > 0;
+			if (before) {                             /* already home: the home before it */
+				acid_homes--;
+				top--;
+			}
+			memcpy(stored[L_SET_SH], acid_home[top], sizeof acid_home[0]);
+			pickup_all();
+			acid_snap_to = acid_home_takes[top];
+			acid_snap_seq++;
+			const uint8_t lv[4] = { SP1_ENGINE_LED_FULL, 0u, 0u, SP1_ENGINE_LED_FULL };
+			flash(lv);
+			LOG("ACID snap back: %s (%d take%s)\n", before ? "the home before" : "home",
+			    acid_snap_to < takes ? acid_snap_to : takes,
+			    (acid_snap_to < takes ? acid_snap_to : takes) == 1 ? "" : "s");
+		}
+		acid_step_was = st.step;
+	}
+
+	/* ---- SETTINGS: the rest style (the rocker is the acid line's while it plays) ---- */
+	if (on_set && !fnc && !acid && (ffwd_press || rwd_press)) {
 		pt.rest_choke = rwd_press ? 1u : 0u;
 		const uint8_t lv[4] = { SP1_ENGINE_LED_FULL, pt.rest_choke ? SP1_ENGINE_LED_FULL : 0u,
 					pt.rest_choke ? SP1_ENGINE_LED_FULL : 0u, SP1_ENGINE_LED_FULL };
@@ -902,6 +1022,10 @@ void sp1_dui_ctl(struct sp1_drums_ctl *o)
 		o->acid_level = powf(10.0f, cfg.acid_level_db / 20.0f) * 2.5f;
 		o->acid_duck = cfg.acid_duck;
 		o->acid_transpose = cfg.acid_transpose;
+		o->acid_keep_seq = acid_keep_seq;
+		o->acid_undo_seq = acid_undo_seq;
+		o->acid_snap_seq = acid_snap_seq;
+		o->acid_snap_to = acid_snap_to;
 		for (int l = 0; l < 4; l++) {
 			o->acid_dens[l] = cfg.acid_dens[l];
 			o->acid_len[l] = (uint8_t)cfg.acid_len[l];

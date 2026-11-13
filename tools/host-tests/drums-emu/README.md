@@ -12,6 +12,7 @@ what it should (`--expect`).
 | `run4-reload.sh` | boots from run3's drive (`$IN`) with a bad `tape_release` in drums.cnfg: the line is named, the slot's `[drums]` loads with 0 bad fields, the kit, bass and cables are back, and the next power-off saves the same `[drums]` text |
 
 | `run5-acid.sh` | SETTINGS, `••` + FFWD to acid 1 with drums 2 and 4 muted, PLAY, SETTINGS + SHIFT F1 / F2 as its cutoff and resonance, on to acid 2, then a `••` hold to power off: the slot keeps `bass = campfire`. `WAV=file` writes what it played |
+| `run6-acid-moves.sh` | acid 1 over a kick and a hat, a cutoff sweep on SETTINGS + SHIFT F1, FFWD tap (keep), RWD tap (undo), keep again, FFWD held (add), resonance moved, RWD held (snap back: home, one take), RWD held again (the home before, no takes). `WAV=file` writes what it played |
 | `acid-cpu.mjs` | not a pass / fail run: the **wasm** build's CPU meter over eight workloads, from the kit alone to four drums, the acid line and all four bus FX (`node acid-cpu.mjs emulator/web`) |
 
 The emulator lives on the `claude/wakes-emulator` branch (`emulator/`). Its `build.sh` needs
@@ -24,5 +25,6 @@ build with `EMU_KCONFIG="SP1_DRUMS=y"`. Then:
     WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run3-sequencer.sh
     WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run4-reload.sh
     WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run5-acid.sh
+    WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run6-acid-moves.sh
 
 Each prints `[emu] N of N expectations met` and exits 0, or names what was missing.

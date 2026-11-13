@@ -80,6 +80,12 @@ struct sp1_drums_ctl {
 	float acid_dens[4];           /* the lanes' densities: gate, accent, slide, octave     */
 	uint8_t acid_len[4];          /* the lanes' loops, 0 = the pattern's                   */
 	float acid_transpose;         /* semitones                                             */
+	/* Recorded fader moves (cutoff, resonance, decay, drive). The kit always holds the last
+	 * bar of them; each keep makes that bar a take that loops under the faders, up to four. */
+	uint32_t acid_keep_seq;       /* each increment: the last bar becomes a take           */
+	uint32_t acid_undo_seq;       /* each increment: the newest take goes                  */
+	uint32_t acid_snap_seq;       /* each increment: back to acid_snap_to takes            */
+	uint8_t acid_snap_to;
 };
 
 /* Where a t output (or the Y clock) goes. */
