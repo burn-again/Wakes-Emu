@@ -8,5 +8,8 @@ OPL2-style FM, LFSR noise, Gendy, cellular automata, the Rungler, bytebeat, Poly
   (CONFIG_SP1_CLASSIC); without it, that engine has no models.
 - `tinyfx.c/.h`: DJ filter, wavefolder, Chebyshev, through-zero FM, bit crusher (mono or stereo).
 - `tinybass.c/.h`: the bass voice (saw -> square -> triangle, octave, filter, glide).
+- `tinyacid.c/.h`: the acid voice, not yet in the firmware build: one core, a 303 and a 101 character
+  (saw / pulse / sub / noise, a four-pole ladder with filter FM, accent, slide, drive, the kick's duck).
+  `tools/host-tests/acidtest.c` checks what makes each character, `acidbench.c` what it costs.
 
 Prototypes, renders and the Cortex-M4 benchmarks live in sp1-drum-bench/tinykit.
