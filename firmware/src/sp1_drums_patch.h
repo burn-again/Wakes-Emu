@@ -35,7 +35,7 @@
 extern "C" {
 #endif
 
-#define SP1_DRUMS_LAYERS 14      /* KIT, KIT+SHIFT, DRUM 1-4 (+SHIFT), SETTINGS (+SHIFT), LANES (+SHIFT) */
+#define SP1_DRUMS_LAYERS 18      /* KIT, DRUM 1-4, SETTINGS, LANES, SOUND, PATTERN: each with its SHIFT */
 
 struct sp1_drums_patch {
 	bool present;                 /* the slot had a [drums] section                    */
@@ -74,6 +74,8 @@ struct sp1_drums_cfg {
 	float acid_level_db;          /* -40..0                                             */
 	float acid_duck;              /* octaves the kick dips the cutoff, 0..3             */
 	float acid_transpose;         /* semitones, -24..24                                 */
+	int   acid_start;             /* 1: the acid line plays at power-on; 0: [bass] mode */
+	int   acid_pattern;           /* the pattern it starts on, 0-based                  */
 };
 /* A bass mode's word in a preset and in drums.cnfg: off, y, rests, or an acid pattern's name. */
 const char *sp1_drums_bass_name(unsigned mode);

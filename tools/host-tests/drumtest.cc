@@ -75,6 +75,7 @@ static void fresh(sp1_synth_params& p, int kit, uint8_t solo) {
   sp1_dui_load_kit(kit);
   sp1_dui_ctl(&p.drums);
   p.drums.mute = (uint8_t)(~solo & 0x0Fu);
+  p.drums.bass_mode = SP1_BASS_OFF;          // the pages start with the acid line on; these checks are the kit's
   p.drums.rest_clear_seq = clear_seq;
   p.drums.jitter = 0.0f;
   p.drums.deja = 0.5f;
@@ -520,13 +521,34 @@ int main(int argc, char** argv) {
     #undef ONCE
     // ---- the preset's word and drums.cnfg's [acid] ----
     { struct sp1_drums_cfg c; struct sp1_drums_cfg_reader r;
-      const char* t = "[bass]\nmode = crawl\n[acid]\nlevel = -9\nduck = 1.5\ntranspose = -12\n"
-                      "line = E1 . E2~ _\nline = E1 nope\nwhat = 1\n[bass]\nmode = french-house\n";
+      const char* t = "[bass]\nmode = rests\n[acid]\nlevel = -9\nduck = 1.5\ntranspose = -12\nstart = off\n"
+                      "pattern = french-house   ; a comment\nline = E1 . D#2~ _ # sharps are not comments\nline = E1 nope\nwhat = 1\n";
       sp1_drums_cfg_begin(&r, &c, nullptr, nullptr); sp1_drums_cfg_feed(&r, t, strlen(t));
       const int bad = sp1_drums_cfg_end(&r);
       snprintf(what, sizeof what, "drums.cnfg [acid]: %d bad lines (want 2), the good ones read, the user line is the first", bad);
-      check(bad == 2 && c.bass_mode == SP1_BASS_ACID + 16 && c.acid_level_db == -9.0f && c.acid_duck == 1.5f &&
-            c.acid_transpose == -12.0f && sp1_acid_pattern_of(SP1_ACID_BUILTIN)->n == 4, what);
+      check(bad == 2 && c.bass_mode == SP1_BASS_RESTS && c.acid_pattern == 16 && c.acid_start == 0 &&
+            c.acid_level_db == -9.0f && c.acid_duck == 1.5f && c.acid_transpose == -12.0f &&
+            sp1_acid_pattern_of(SP1_ACID_BUILTIN)->n == 4 && sp1_acid_pattern_of(SP1_ACID_BUILTIN)->s[2].note == 39, what);
+      // the pages at power-on: the acid line on pattern 1, drums 2 and 4 muted, the pattern's sound on the faders
+      { sp1_synth_params q; memset(&q, 0, sizeof q); sp1_dui_init(); sp1_dui_ctl(&q.drums);
+        const struct sp1_acid_preset* ap = sp1_acid_preset(0);
+        snprintf(what, sizeof what, "power-on: line %s, mute %d, cutoff %.2f, gate %.2f, level %.2f, transpose %.0f, densities %.1f",
+                 sp1_drums_bass_name(q.drums.bass_mode), q.drums.mute, q.drums.acid_p[0], q.drums.acid_gate, q.drums.acid_level,
+                 q.drums.acid_transpose, q.drums.acid_dens[0]);
+        check(q.drums.bass_mode == SP1_BASS_ACID && q.drums.mute == 0x0A && q.drums.acid_p[0] == ap->p[0] &&
+              q.drums.acid_gate == ap->gate && fabsf(q.drums.acid_level - 1.225f) < 0.01f && q.drums.acid_transpose == 0.0f &&
+              q.drums.acid_dens[0] == 0.5f && q.drums.acid_len[0] == 0, what);
+        // a slot saved before the acid line was the default says "bass = off": the line still plays; "line = off" is honoured
+        struct sp1_drums_patch a; sp1_dui_get(&a); char txt[4096];
+        const int n = sp1_drums_patch_write(&a, txt, sizeof txt);
+        struct sp1_drums_patch b;
+        check(n > 0 && strstr(txt, "\nline = acid-home\n") && strstr(txt, "\nsound_faders = ") && strstr(txt, "\npattern_shift = "),
+              "a preset writes line = and the SOUND and PATTERN pages");
+        const char* old = "[drums]\nkit = 1\nbass = off\n"; sp1_drums_patch_default(&b, 0); sp1_drums_patch_parse(old, strlen(old), &b);
+        const char* off = "[drums]\nkit = 1\nline = off\n"; struct sp1_drums_patch c2; sp1_drums_patch_default(&c2, 0);
+        sp1_drums_patch_parse(off, strlen(off), &c2);
+        check(b.bass_mode == SP1_BASS_ACID && c2.bass_mode == SP1_BASS_OFF, "an old slot's bass = off leaves the line on; line = off turns it off");
+      }
       check(strcmp(sp1_drums_bass_name(SP1_BASS_ACID + 1), "campfire") == 0 && strcmp(sp1_drums_bass_name(2), "rests") == 0 &&
             strcmp(sp1_drums_bass_name(200), "off") == 0, "a bass mode's word: rests, campfire, and off for nonsense");
     }

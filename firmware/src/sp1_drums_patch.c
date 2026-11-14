@@ -105,6 +105,7 @@ static const char *const kLayerKey[SP1_DRUMS_LAYERS] = {
 	"kit_faders", "kit_shift", "drum1_faders", "drum1_shift", "drum2_faders", "drum2_shift",
 	"drum3_faders", "drum3_shift", "drum4_faders", "drum4_shift", "settings_faders",
 	"settings_shift", "lanes_faders", "lanes_shift",
+	"sound_faders", "sound_shift", "pattern_faders", "pattern_shift",
 };
 static const char *const kBassName[3] = { "off", "y", "rests" };
 
@@ -168,9 +169,29 @@ void sp1_drums_patch_default(struct sp1_drums_patch *p, int kit)
 		p->v[12][i] = 0.5f;                          /* the acid lanes' densities: as written */
 		p->v[13][i] = 1.0f;                          /* their lengths: the pattern's own      */
 	}
+	{       /* the acid line: pattern 1 and its sound, the kick and the hat under it */
+		const struct sp1_acid_preset *ap = sp1_acid_preset(0);
+		p->v[14][0] = ap->p[0];                      /* SOUND: cutoff, resonance, decay, drive */
+		p->v[14][1] = ap->p[1];
+		p->v[14][2] = ap->p[3];
+		p->v[14][3] = ap->p[5];
+		p->v[15][0] = ap->p[2];                      /* SOUND + SHIFT: envelope, accent, slide, gate */
+		p->v[15][1] = ap->p[4];
+		p->v[15][2] = ap->p[11];
+		p->v[15][3] = ap->gate;
+		p->v[16][0] = 0.5f / (float)SP1_ACID_PRESETS;   /* PATTERN: the first, no transpose, */
+		p->v[16][1] = 0.5f;                          /* its own octave, as written             */
+		p->v[16][2] = 0.5f;
+		p->v[16][3] = 0.5f;
+		p->v[17][0] = ap->p[6];                      /* PATTERN + SHIFT: wave, sub, FM, level  */
+		p->v[17][1] = ap->p[8];
+		p->v[17][2] = ap->p[10];
+		p->v[17][3] = 0.7f;
+	}
 	p->fx_on = 0x0Fu;
 	p->rest_choke = 1u;
-	p->bass_mode = 0u;
+	p->bass_mode = (uint8_t)SP1_BASS_ACID;           /* the acid line, pattern 1               */
+	p->mute = 0x0Au;                                 /* drums 2 and 4 wait: the kick and the hat play */
 }
 
 static int put(char *buf, size_t size, size_t *at, const char *fmt, int a, int b, int c, int d)
@@ -238,7 +259,7 @@ int sp1_drums_patch_write(const struct sp1_drums_patch *p, char *buf, size_t siz
 	if (put(buf, size, &at, "fx = %d\nmute = %d\n", p->fx_on, p->mute, 0, 0) < 0) {
 		return -1;
 	}
-	const int n1 = snprintf(buf + at, size - at, "rests = %s\nbass = %s\n",
+	const int n1 = snprintf(buf + at, size - at, "rests = %s\nline = %s\n",
 				p->rest_choke ? "choke" : "ring",
 				sp1_drums_bass_name(p->bass_mode));
 	if (n1 < 0 || (size_t)n1 >= size - at) {
@@ -362,7 +383,13 @@ static bool field(struct sp1_drums_patch *p, const char *k, size_t kn, const cha
 		}
 		return false;
 	}
-	if (key_is(k, kn, "bass")) {
+	/* "line" is what plays the bass part: off, y, rests (the old bass) or an acid pattern.
+	 * "bass" is the same key from before the acid line was the default: its "off" is not
+	 * honoured, so a slot saved then comes back with the line playing. */
+	if (key_is(k, kn, "bass") && lower_eq(s, wn, "off")) {
+		return true;
+	}
+	if (key_is(k, kn, "bass") || key_is(k, kn, "line")) {
 		for (int m = 0; m < SP1_BASS_MODES; m++) {
 			if (lower_eq(s, wn, sp1_drums_bass_name((unsigned)m))) {
 				p->bass_mode = (uint8_t)m;
@@ -474,8 +501,9 @@ const char SP1_DRUMS_CNFG_TEMPLATE[] =
 "tape_release = 1.2      ; seconds to speed back up; 0 = at once\n"
 "\n"
 "[bass]\n"
-"# off, y (on the Y clock, Y picks the note) or rests (8th notes where every drum rests).\n"
-"# SETTINGS \"••\" + FFWD / RWD changes it live; a preset keeps its own.\n"
+"# The old bass, heard when the acid line is not: off, y (on the Y clock, Y picks the\n"
+"# note) or rests (8th notes where every drum rests). SETTINGS \"••\" + FFWD / RWD steps\n"
+"# acid line / off / y / rests live; a preset keeps its own.\n"
 "mode = off\n"
 "root = 36               ; MIDI note of the lowest degree\n"
 "octaves = 2             ; how far Y reaches, 1 .. 4\n"
@@ -486,15 +514,14 @@ const char SP1_DRUMS_CNFG_TEMPLATE[] =
 "level = -15             ; dB in the mix, -40 .. 0\n"
 "\n"
 "[acid]\n"
-"# The acid line plays in the bass's place when the bass mode is an acid pattern: step to\n"
-"# one with SETTINGS \"••\" + FFWD / RWD, or name it above (mode = acid-home). The patterns:\n"
+"# The acid line: a 303 / 101 voice on a 16-step pattern. T1 SOUND, T2 PATTERN, T3 LANES.\n"
+"start = on              ; on: it plays at power-on. off: [bass] mode decides\n"
+"pattern = acid-home     ; the pattern it starts on. The patterns:\n"
 "# acid-home, campfire, sixth-form, octave-hopper, rubber, crawl, fold-garden,\n"
 "# three-accents, jungle, raga, reggaeton, cumbia, thrash, ambient, markov,\n"
 "# electro-house, french-house, psytrance, dub-techno, uk-garage, trap, synthwave,\n"
 "# afrobeat, ebm, footwork, italo, gqom, and user: the line below.\n"
-"# SETTINGS + SHIFT is then its cutoff, resonance, decay and drive, and two more \"••\" taps\n"
-"# from SETTINGS open LANES: each lane's density, and with SHIFT its loop length.\n"
-"level = -12             ; dB in the mix, -40 .. 0\n"
+"level = -12             ; a trim in dB under PATTERN + SHIFT F4, -40 .. 0 (-12 = none)\n"
 "duck = 0.5              ; octaves the kick dips its cutoff, 0 .. 3\n"
 "transpose = 0           ; semitones, -24 .. 24\n"
 "# Your own pattern, one token per 16th, up to 32: a note (C2, D#2, Bb1), . a rest,\n"
@@ -522,6 +549,8 @@ void sp1_drums_cfg_defaults(struct sp1_drums_cfg *c)
 	c->acid_level_db = -12.0f;
 	c->acid_duck = 0.5f;
 	c->acid_transpose = 0.0f;
+	c->acid_start = 1;
+	c->acid_pattern = 0;
 }
 
 void sp1_drums_cfg_begin(struct sp1_drums_cfg_reader *r, struct sp1_drums_cfg *c,
@@ -562,9 +591,10 @@ static bool cfg_num(struct sp1_drums_cfg_reader *r, const char *key, const char 
 static void cfg_line(struct sp1_drums_cfg_reader *r, const char *a, const char *b)
 {
 	struct sp1_drums_cfg *c = r->c;
-	/* strip an inline comment */
+	/* strip an inline comment: ';' anywhere, '#' at the start or after a space (a pattern
+	 * line has sharps in it: D#2) */
 	for (const char *p = a; p < b; p++) {
-		if (*p == ';' || *p == '#') {
+		if (*p == ';' || (*p == '#' && (p == a || is_space(p[-1])))) {
 			b = p;
 			break;
 		}
@@ -614,6 +644,22 @@ static void cfg_line(struct sp1_drums_cfg_reader *r, const char *a, const char *
 			(void)cfg_num(r, key, v, b, 0.0f, 3.0f, &c->acid_duck);
 		} else if (key_is(a, kn, "transpose")) {
 			(void)cfg_num(r, key, v, b, -24.0f, 24.0f, &c->acid_transpose);
+		} else if (key_is(a, kn, "start")) {
+			if (lower_eq(v, vn, "on") || lower_eq(v, vn, "off")) {
+				c->acid_start = lower_eq(v, vn, "on") ? 1 : 0;
+			} else {
+				bad_line(r, key, "on or off");
+			}
+		} else if (key_is(a, kn, "pattern")) {
+			int m = 0;
+			while (m < SP1_ACID_PRESETS && !lower_eq(v, vn, sp1_acid_preset(m)->name)) {
+				m++;
+			}
+			if (m < SP1_ACID_PRESETS) {
+				c->acid_pattern = m;
+			} else {
+				bad_line(r, key, "not a pattern's name");
+			}
 		} else if (key_is(a, kn, "line")) {
 			if (sp1_acid_set_user(v, vn) < 0) {
 				bad_line(r, key, "not a pattern");
@@ -657,15 +703,7 @@ static void cfg_line(struct sp1_drums_cfg_reader *r, const char *a, const char *
 		} else if (lower_eq(v, vn, "rests")) {
 			c->bass_mode = 2;
 		} else {
-			int m = SP1_BASS_ACID;
-			while (m < SP1_BASS_MODES && !lower_eq(v, vn, sp1_drums_bass_name((unsigned)m))) {
-				m++;
-			}
-			if (m < SP1_BASS_MODES) {
-				c->bass_mode = m;
-			} else {
-				bad_line(r, key, "off, y, rests or an acid pattern's name");
-			}
+			bad_line(r, key, "off, y or rests");
 		}
 	} else if (bass && key_is(a, kn, "root")) {
 		(void)cfg_num(r, key, v, b, 12.0f, 72.0f, &c->bass_root);

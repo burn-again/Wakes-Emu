@@ -50,7 +50,9 @@ enum sp1_dui_page {
 	SP1_DUI_KIT = 0,
 	SP1_DUI_DRUM1, SP1_DUI_DRUM2, SP1_DUI_DRUM3, SP1_DUI_DRUM4,
 	SP1_DUI_SETTINGS,
-	SP1_DUI_LANES,                /* the acid line's lanes: two more "••" taps from SETTINGS */
+	SP1_DUI_LANES,                /* T3: the acid line's lanes                               */
+	SP1_DUI_SOUND,                /* T1: the acid voice (the page at power-on)               */
+	SP1_DUI_PATTERN,              /* T2: which pattern, transpose, octave, sparse / dense    */
 	SP1_DUI_PAGES
 };
 

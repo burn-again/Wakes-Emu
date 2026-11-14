@@ -15,18 +15,25 @@ battery display, VOL, USB audio and MIDI, PRST slots (`••` + PLAY), the rip 
 
 ## Pages
 
-| page | how you get there | how you leave |
+The row of four buttons is the map. **T*n* alone** opens one of four pages; **`••` + T*n***
+opens drum *n*. The device starts on **SOUND**, with the acid line on pattern 1 over the
+kick and the hat (drums 2 and 4 muted).
+
+| page | how you get there | its own button again |
 |---|---|---|
-| **KIT** | power on; or T*n* again from DRUM *n* | — |
-| **DRUM 1–4** | T1–T4 from KIT or another drum page | the same T again → KIT |
+| **SOUND** | **T1** (and at power-on) | T1: the acid line **off / on** |
+| **PATTERN** | **T2** | — |
+| **LANES** | **T3** | — |
+| **KIT** | **T4** | — |
+| **DRUM 1–4** | **`••` + T1–T4** | `••` + T*n*: **mute / unmute** drum *n* |
 | **SETTINGS** | `••` double tap | one `••` tap → the page you came from |
-| **MARBLES** | `••` triple tap | `••` triple tap → KIT |
+| **MARBLES** | `••` triple tap | `••` triple tap → SOUND |
 
 - A **tap** is a `••` press under 300 ms with nothing else touched; the next tap must start
   within 400 ms. The second tap opens SETTINGS at once and a third goes to MARBLES, so a
   single tap on SETTINGS only leaves once those 400 ms have passed.
 - **Holding `••`** shows the page's SHIFT layer.
-- Entering a drum page flashes its LED (T1 for drum 1 …), KIT flashes all four at half,
+- Entering a page flashes its button's LED (a drum's page: its LED over a half-lit row);
   SETTINGS breathes. The row then shows the page's four values, as in Wakes.
 - Pickup is Wakes': a fader that does not match the value it is showing catches up rather
   than jumping, on every page.
@@ -35,13 +42,29 @@ battery display, VOL, USB audio and MIDI, PRST slots (`••` + PLAY), the rip 
 
 | page | F1 | F2 | F3 | F4 |
 |---|---|---|---|---|
-| **KIT** | kit pitch, ±12 semitones | kit tone | kit decay | **fill** |
+| **SOUND** (T1) | **cutoff** | **resonance** | **decay** | **drive** |
+| **SOUND + SHIFT** | envelope depth | accent | slide time | gate length |
+| **PATTERN** (T2) | **pattern** (28 zones) | **transpose**, ±12 semitones | **octave**, −2 … +2 | **sparse ↔ dense** |
+| **PATTERN + SHIFT** | saw ↔ pulse | sub | filter FM | **level** |
+| **LANES** (T3) | gate density | accent density | slide density | octave density |
+| **LANES + SHIFT** | gate length | accent length | slide length | octave length |
+| **KIT** (T4) | kit pitch, ±12 semitones | kit tone | kit decay | **fill** |
 | **KIT + SHIFT** | DJ filter (centre off, down low-pass, up high-pass) | wavefolder | Chebyshev | through-zero FM |
-| **DRUM *n*** | pitch | tone | decay | mod |
+| **DRUM *n*** (`••` + T*n*) | pitch | tone | decay | mod |
 | **DRUM *n* + SHIFT** | **density** | level | **length** | excite |
 | **SETTINGS** | **swing** | **morph** | FM carrier pitch (±3 octaves around G3) | bus drive (×1 … ×4 into the soft clip) |
 | **SETTINGS + SHIFT** | **bass octave** (5 steps, −2 … +2) | **bass shape** (saw → square → triangle) | **bass cutoff** | **bass decay** |
 
+- **SOUND**'s four are the ones whose moves are recorded (keep / undo / snap back, below).
+- **PATTERN F1** chooses the pattern: 28 zones along the fader, with hysteresis. The row
+  shows which quarter of the list you are in and the log names it (`PATTERN 9: jungle
+  (101)`). The new pattern is **taken up at the next bar line**, so sweeping the fader does
+  not chop the groove; it brings its own sound to SOUND and its lanes to LANES. Choosing a
+  pattern turns the line on.
+- **Transpose** has a centre detent (none). **Octave** is five zones. **Sparse ↔ dense** has
+  a centre detent too: it moves all four lanes' densities together, down to nothing, up to
+  every weighted mark.
+- **Level**: 0.7 on the fader (where it starts) is −6 dB in the mix, the top 0 dB.
 - KIT's four are **offsets for every drum** with a 10 % centre detent: centred is the kit as
   stored. **Fill** adds to every drum's density, up to ±0.5: up brings in the ghost notes, down
   thins the groove to its strongest hits.
@@ -99,10 +122,9 @@ envelope, glide) that plays **notes from Marbles' scale**, chosen by Marbles' **
 ## The acid line
 
 A 303 / 101 voice (`third_party/tinykit/tinyacid`) playing a 16-step pattern **in the bass's
-place**. It is the bass mode after "only in the rests": **SETTINGS `••` + FFWD / RWD** steps
-on through the acid patterns (`BASS acid 1: acid-home (303)`), twenty-eight of them, and back
-round to off (RWD from off reaches the last ones first). The row shows the pattern's number
-in base 3 (off 0, half 1, full 2), T1 the ones; the log names it.
+place**. It is on at power-on and has three pages: **T1 SOUND, T2 PATTERN, T3 LANES**. Choose
+a pattern with **PATTERN F1**, or step to the next / previous with **`••` + FFWD / RWD** on
+any of the three pages; **T1 on SOUND** switches the line off and on. There are twenty-eight:
 
 | pattern | | |
 |---|---|---|
@@ -135,20 +157,23 @@ in base 3 (off 0, half 1, full 2), T1 the ones; the log names it.
 | 27 **gqom** | 303 | low, sparse and broken, with filter FM |
 | 28 **user** | 303 | `line =` in drums.cnfg's `[acid]` |
 
-- A pattern brings its sound (character, waveform, envelope depth, accent, slide time ...).
-  **SETTINGS + SHIFT** is then **F1 cutoff · F2 resonance · F3 decay · F4 drive**, set to the
-  pattern's own values when you step to it (the faders catch up from there). Stepping back
-  to the bass restores the bass's four.
+- A pattern brings its sound: SOUND, SOUND + SHIFT and PATTERN + SHIFT's wave, sub and FM are
+  set to the pattern's own values when it is taken up (the faders catch up from there). The
+  pattern fader, transpose, octave, sparse ↔ dense and level stay where they are.
+- **SETTINGS `••` + FFWD / RWD** steps what plays the bass part: the acid line, nothing, the
+  old bass on the Y clock, the old bass in the rests (`LINE off`, `LINE acid 3: sixth-form
+  (101)`). SETTINGS + SHIFT is always the old bass's four.
 - It runs on the sequencer's 16ths, with the swing, and through the bus FX with the kit.
 - **The kick ducks its cutoff**: each hit on slot 1 dips it (`duck` in drums.cnfg, half an
   octave) and it comes back over about a tenth of a second.
-- The pattern is kept in the PRST slot by name (`bass = campfire`).
+- The pattern is kept in the PRST slot by name (`line = campfire`), with every page's faders.
+  A slot saved before the acid line was the default says `bass = off`: that is not honoured,
+  so the line plays; `line = off` is.
 - Not yet: rests from the rocker.
 
 ### LANES: each lane's density and loop length
 
-**Two more `••` taps from SETTINGS**, while an acid pattern is the bass mode, open **LANES**
-(`PAGE lanes`; the row flashes full · half · half · full). One tap goes back to SETTINGS.
+**T3** opens LANES (`PAGE lanes`).
 
 | | F1 | F2 | F3 | F4 |
 |---|---|---|---|---|
@@ -166,16 +191,15 @@ in base 3 (off 0, half 1, full 2), T1 the ones; the log names it.
   became (`LANE accent: 3 steps`).
 - A pattern sets the page when you step to it: densities centred, lengths its own (markov
   starts with three lanes at 12).
-- The buttons and the rocker are SETTINGS': mutes on T1-T4, keep / undo / add / snap back
-  on the rocker. **Snap back and add cover this page too**: home is the four sound faders,
-  the eight lane faders and the takes.
+- The rocker is the acid pages': keep / undo / add / snap back. **Snap back and add cover
+  this page too**: home is SOUND's four faders, the eight lane faders and the takes.
 - The page's faders are kept in the PRST slot (`lanes_faders`, `lanes_shift`).
 
 ### Fader moves: keep, undo, add, snap back
 
 The kit always remembers **the last bar** of the four sound faders (cutoff, resonance, decay,
 drive; 64 points a bar), so there is nothing to arm: play a move, and if it was good, keep it.
-On **SETTINGS, while an acid pattern plays, the rocker without `••`** is:
+On **SOUND, PATTERN and LANES, the rocker without `••`** is:
 
 | | |
 |---|---|
@@ -190,8 +214,8 @@ On **SETTINGS, while an acid pattern plays, the rocker without `••`** is:
   pattern drops the takes and starts a new home.
 - After a snap back the faders catch up from home, as after any page change.
 - Takes are not saved in the PRST slot, and nothing is kept while the clock is stopped.
-- The rest style (choke / ring out), which this rocker sets otherwise, is drums.cnfg's
-  `rest_style` while an acid pattern plays.
+- On KIT and the drum pages the rocker is the rhythm tricks below, and on SETTINGS the rest
+  style, as before.
 
 What it is for (`drumtest` renders each as `jam*.wav`):
 
@@ -264,17 +288,18 @@ that output goes back to none.
 
 ## Buttons
 
-| control | KIT / DRUM *n* | SETTINGS |
-|---|---|---|
-| **T1–T4** | open DRUM *n*; the same T again → KIT | **mute / unmute** drum *n* (the row shows who plays) |
-| **`••` + T1–T4** | **FX 1–4 on / off**: filter, fold, Chebyshev, FM (the row shows which are on) | drum *n*'s **pattern** → the next kit's maps |
-| **`••` + FFWD / RWD** | KIT: **next / previous built-in kit**. DRUM *n*: **next / previous model** for that drum | **bass mode**: off / on the Y clock / only in the rests |
-| **PLAY** | Marbles' clock run / stop | the same |
+| control | SOUND · PATTERN · LANES | KIT | DRUM *n* | SETTINGS |
+|---|---|---|---|---|
+| **T1–T4** | open SOUND · PATTERN · LANES · KIT (T1 on SOUND: the line off / on) | the same | the same | **mute / unmute** drum *n* |
+| **`••` + T1–T4** | open DRUM *n* | open DRUM *n* | open DRUM *n*; its own: **mute / unmute** it | drum *n*'s **pattern** → the next kit's maps |
+| **`••` + FFWD / RWD** | **next / previous acid pattern** (at the bar) | **next / previous kit** | **next / previous model** | **the line**: acid / off / bass on Y / bass in the rests |
+| **FFWD / RWD** | **keep / undo** (tap), **add / snap back** (held) | the rhythm tricks, below | the same, for that drum | rests: ring out / choke |
+| **PLAY** | Marbles' clock run / stop | the same | the same | the same |
 
+- The four bus FX are always in the path: at zero they do nothing (KIT + SHIFT). The
+  `••` + T on / off switches of the first drum firmware are gone; `••` + T is the drum pages.
 - A muted drum fades out over 12 ms if it is ringing, and stays silent until unmuted. Auditioning
   it from its own page (below) still plays it.
-- FX start **on, at zero**: push a KIT + SHIFT fader and you hear it. Switching one off keeps its
-  amount for when it comes back.
 - The eight kits: lich techno, 8-bit breaks, modal gamelan, idm rungler, dub techno, iron vibes,
   glass rungler, gong garden (or **classic**, the LXR-derived voices, in a `CONFIG_SP1_CLASSIC`
   build). The row shows the kit: one LED for kits 1–4, the same LED with the others at half for
