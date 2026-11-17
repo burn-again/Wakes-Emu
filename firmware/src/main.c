@@ -435,7 +435,11 @@ static float tempo_bpm(void)
 		return (float)ms.bpm10 * 0.1f;
 	}
 #endif
+#if defined(CONFIG_SP1_DRUMS)
+	return sp1_dui_tempo() * sp1_dui_speed();     /* HOME's rocker, bent by tape slow */
+#else
 	return sp1_mui_bpm();
+#endif
 }
 #endif
 
@@ -2180,8 +2184,8 @@ int main(void)
 						sp1_playrow_clock_reset();
 						beats_seen = sp1_marbles_beats();
 						printk("CLOCK run: %d.%d BPM, %s, t range %s\n",
-						       (int)sp1_mui_bpm(),
-						       (int)(sp1_mui_bpm() * 10.0f) % 10,
+						       (int)tempo_bpm(),
+						       (int)(tempo_bpm() * 10.0f) % 10,
 						       sp1_marbles_model_name(sp1_mui_model()),
 						       t_range_name[sp1_mui_t_range()]);
 					} else {
@@ -2606,8 +2610,11 @@ int main(void)
 				sp1_mui_params(&mp);
 #endif
 #if defined(CONFIG_SP1_DRUMS)
-				/* Tape slow: Marbles' clock bends with the machine (RATE is semitones). */
-				mp.rate += 12.0f * log2f(sp1_dui_speed());
+				/* The tempo is HOME's (its rocker, 20-140 BPM), whatever Marbles' RATE
+				 * fader and range say; tape slow bends it (RATE is semitones). */
+				mp.rate = 12.0f * log2f(sp1_dui_tempo() /
+							sp1_marbles_bpm(0.0f, sp1_mui_t_range())) +
+					  12.0f * log2f(sp1_dui_speed());
 #endif
 				/* INTELLIGENT (M4c) needs both modules: which parameters of
 				 * the CURRENT engine are bipolar. Re-read every tick, so the

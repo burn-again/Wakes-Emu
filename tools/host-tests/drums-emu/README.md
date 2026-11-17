@@ -14,6 +14,7 @@ what it should (`--expect`).
 | `run5-acid.sh` | the acid line from power-on: PLAY, SOUND F1 / F2 as its cutoff and resonance, T2 PATTERN, `••` + FFWD to the next pattern (taken up at the bar), then a `••` hold to power off: the slot keeps `line = campfire` and the mutes. `WAV=file` writes what it played |
 | `run6-acid-moves.sh` | a cutoff sweep on SOUND F1, FFWD tap (keep), RWD tap (undo), keep again, FFWD held (add), resonance moved, RWD held (snap back: home, one take), RWD held again (the home before, no takes). `WAV=file` writes what it played |
 | `run7-acid-lanes.sh` | PATTERN F1 moved to the markov pattern, T3 LANES: the accent lane's density down and back, SHIFT F3 stepping the slide lane's length through its zones, RWD held (snap back: the lanes home again), T4 KIT, then power off: the slot keeps the line and `lanes_faders` / `lanes_shift` |
+| `run8-home.sh` | HOME from power-on: PLAY, F3 to scene 11 (reggaeton over lich techno at 92 BPM, at the bar), RWD held (the tempo glides down), FFWD tapped (one up), F2 to kit 3, F1 and F4 down and back, T1 then a `••` double tap back to HOME, MARBLES and back, then power off: the slot keeps the tempo, the line, the kit and `home_faders` |
 | `acid-cpu.mjs` | not a pass / fail run: the **wasm** build's CPU meter over eight workloads, from the kit alone to four drums, the acid line and all four bus FX (`node acid-cpu.mjs emulator/web`) |
 
 The emulator lives on the `claude/wakes-emulator` branch (`emulator/`). Its `build.sh` needs
@@ -28,5 +29,6 @@ build with `EMU_KCONFIG="SP1_DRUMS=y"`. Then:
     WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run5-acid.sh
     WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run6-acid-moves.sh
     WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run7-acid-lanes.sh
+    WAKES_HEADLESS=path/to/wakes_headless tools/host-tests/drums-emu/run8-home.sh
 
 Each prints `[emu] N of N expectations met` and exits 0, or names what was missing.

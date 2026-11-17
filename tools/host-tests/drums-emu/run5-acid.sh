@@ -8,6 +8,7 @@ OUT=${OUT:-run5-drive}
 tap() { echo "$1:$2=1 $(($1+90)):$2=0"; }
 fn()  { echo "$1:fnc=1 $(($1+100)):$2=1 $(($1+190)):$2=0 $(($1+300)):fnc=0"; }
 EV="0:fnc=1 0:f1=0.5 0:f2=0.5 0:f3=0.5 0:f4=0.5 1700:fnc=0"
+EV="$EV $(tap 2000 t1)"                                # SOUND (power-on is HOME)
 EV="$EV $(tap 2500 play)"
 # SOUND: F1 down to catch the cutoff, then a sweep up; F2 up for resonance
 EV="$EV 5000:f1=0.3 5200:f1=0.35 5600:f1=0.45 6000:f1=0.6 6400:f1=0.7 6800:f2=0.8 7200:f2=0.9"

@@ -53,6 +53,7 @@ enum sp1_dui_page {
 	SP1_DUI_LANES,                /* T3: the acid line's lanes                               */
 	SP1_DUI_SOUND,                /* T1: the acid voice (the page at power-on)               */
 	SP1_DUI_PATTERN,              /* T2: which pattern, transpose, octave, sparse / dense    */
+	SP1_DUI_HOME,                 /* power-on and "••" double tap: balance, kit, scene, filter */
 	SP1_DUI_PAGES
 };
 
@@ -88,6 +89,7 @@ const char *sp1_dui_log(void);            /* a line to print, or NULL; call unti
 /* What the kit plays. */
 void  sp1_dui_ctl(struct sp1_drums_ctl *out);
 float sp1_dui_speed(void);                /* tape slow: Marbles' clock follows it         */
+float sp1_dui_tempo(void);                /* HOME's tempo in BPM: Marbles' clock runs at it */
 
 /* Model-row LEDs: the active layer's four values (SETTINGS breathes). */
 void sp1_dui_leds(uint8_t out[4]);

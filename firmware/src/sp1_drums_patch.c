@@ -105,7 +105,7 @@ static const char *const kLayerKey[SP1_DRUMS_LAYERS] = {
 	"kit_faders", "kit_shift", "drum1_faders", "drum1_shift", "drum2_faders", "drum2_shift",
 	"drum3_faders", "drum3_shift", "drum4_faders", "drum4_shift", "settings_faders",
 	"settings_shift", "lanes_faders", "lanes_shift",
-	"sound_faders", "sound_shift", "pattern_faders", "pattern_shift",
+	"sound_faders", "sound_shift", "pattern_faders", "pattern_shift", "home_faders",
 };
 static const char *const kBassName[3] = { "off", "y", "rests" };
 
@@ -188,6 +188,11 @@ void sp1_drums_patch_default(struct sp1_drums_patch *p, int kit)
 		p->v[17][2] = ap->p[10];
 		p->v[17][3] = 0.7f;
 	}
+	p->v[18][0] = 0.5f;                              /* HOME: drums and line both full     */
+	p->v[18][1] = ((float)kit + 0.5f) / (float)SP1_DRUMS_KITS;   /* the kit                    */
+	p->v[18][2] = 0.5f / (float)SP1_ACID_SCENES;     /* scene 1                            */
+	p->v[18][3] = 0.5f;                              /* the DJ filter: off                 */
+	p->tempo = 120.0f;
 	p->fx_on = 0x0Fu;
 	p->rest_choke = 1u;
 	p->bass_mode = (uint8_t)SP1_BASS_ACID;           /* the acid line, pattern 1               */
@@ -266,6 +271,9 @@ int sp1_drums_patch_write(const struct sp1_drums_patch *p, char *buf, size_t siz
 		return -1;
 	}
 	at += (size_t)n1;
+	if (put(buf, size, &at, "tempo = %d\n", (int)(p->tempo + 0.5f), 0, 0, 0) < 0) {
+		return -1;
+	}
 	if (put(buf, size, &at, "patterns = %d %d %d %d\n", p->pat[0] + 1, p->pat[1] + 1,
 		p->pat[2] + 1, p->pat[3] + 1) < 0 ||
 	    put(buf, size, &at, "t_cables = %d %d %d %d\n", p->t_dest[0], p->t_dest[1],
@@ -375,6 +383,13 @@ static bool field(struct sp1_drums_patch *p, const char *k, size_t kn, const cha
 	size_t wn = 0;
 	while (s + wn < e && !is_space(s[wn])) {
 		wn++;
+	}
+	if (key_is(k, kn, "tempo")) {
+		if (nums(v, e, f, 1) != 1 || f[0] < 20.0f || f[0] > 140.0f) {
+			return false;
+		}
+		p->tempo = f[0];
+		return true;
 	}
 	if (key_is(k, kn, "rests")) {
 		if (lower_eq(s, wn, "choke") || lower_eq(s, wn, "ring")) {

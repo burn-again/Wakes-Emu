@@ -548,6 +548,22 @@ int main(int argc, char** argv) {
         const char* off = "[drums]\nkit = 1\nline = off\n"; struct sp1_drums_patch c2; sp1_drums_patch_default(&c2, 0);
         sp1_drums_patch_parse(off, strlen(off), &c2);
         check(b.bass_mode == SP1_BASS_ACID && c2.bass_mode == SP1_BASS_OFF, "an old slot's bass = off leaves the line on; line = off turns it off");
+        check(b.tempo == 120.0f && strstr(txt, "\ntempo = 120\n") && strstr(txt, "\nhome_faders = "),
+              "a preset writes tempo = and the HOME page; an old slot without them plays at 120");
+        const char* t2 = "[drums]\nkit = 1\ntempo = 87\n"; struct sp1_drums_patch c3; sp1_drums_patch_default(&c3, 0);
+        const char* t3 = "[drums]\nkit = 1\ntempo = 300\n"; struct sp1_drums_patch c4; sp1_drums_patch_default(&c4, 0);
+        const int bad3 = sp1_drums_patch_parse(t2, strlen(t2), &c3), bad4 = sp1_drums_patch_parse(t3, strlen(t3), &c4);
+        check(c3.tempo == 87.0f && bad3 == 0 && c4.tempo == 120.0f && bad4 == 1, "tempo = 87 reads; tempo = 300 is refused and keeps 120");
+        // the scenes: one per built-in pattern, a real kit each, tempos HOME's rocker can reach
+        bool ok = true;
+        for (int i = 0; i < SP1_ACID_SCENES; ++i) {
+          const struct sp1_acid_scene* sc = sp1_acid_scene(i);
+          const struct sp1_acid_preset* sp = sp1_acid_preset(sc->pattern);
+          ok = ok && sc->pattern == i && sc->kit < SP1_DRUMS_KITS && sc->mute < 16 && sp->bpm >= 20.0f && sp->bpm <= 180.0f;
+        }
+        snprintf(what, sizeof what, "%d scenes, each its own pattern with a kit", SP1_ACID_SCENES); check(ok, what);
+        // HOME F1, the balance: the pages give both at full when it is centred (as at power-on)
+        check(q.drums.level[0] > 0.0f && q.drums.acid_level > 0.0f, "power-on balance: the drums and the line both play");
       }
       check(strcmp(sp1_drums_bass_name(SP1_BASS_ACID + 1), "campfire") == 0 && strcmp(sp1_drums_bass_name(2), "rests") == 0 &&
             strcmp(sp1_drums_bass_name(200), "off") == 0, "a bass mode's word: rests, campfire, and off for nonsense");

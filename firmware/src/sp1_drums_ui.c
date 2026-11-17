@@ -43,6 +43,11 @@
 #define L_SOUND_SH      15       /* acid: envelope, accent, slide time, gate length */
 #define L_PAT           16       /* acid: pattern, transpose, octave, sparse / dense */
 #define L_PAT_SH        17       /* acid: wave, sub, filter FM, level */
+#define L_HOME          18       /* HOME: balance, kit, scene, DJ filter. Its SHIFT is L_SET:
+				  * swing, morph, FM carrier, drive (what SETTINGS was) */
+#define TEMPO_MIN       20.0f
+#define TEMPO_MAX       140.0f
+#define TEMPO_GLIDE     20.0f    /* BPM a second while the rocker is held on HOME */
 
 /* Everything a preset holds (sp1_drums_patch.h): the kit, the voices, the twelve layers'
  * values, FX, mutes, rests, the bass mode, the patterns and the cables. */
@@ -56,8 +61,15 @@ static float pos[4], prev[4], now01[4], lock_ref[4];
 static bool  locked[4];
 static int   active = L_KIT;
 
-static enum sp1_dui_page page = SP1_DUI_SOUND;
-static enum sp1_dui_page came_from = SP1_DUI_SOUND;   /* where a SETTINGS exit returns */
+/* HOME's state (its page is further down) */
+static int8_t  zh_scene = -1, zh_kit = -1;
+static int     scene_sel = -1, scene_pending = -1;    /* -1: take it from the fader, unapplied */
+static int     kit_pending = -1;
+static int8_t  home_step_was = -1;
+static uint32_t tempo_ms;                              /* how long the rocker has been held  */
+
+static enum sp1_dui_page page = SP1_DUI_HOME;
+static enum sp1_dui_page came_from = SP1_DUI_HOME;    /* unused since SETTINGS became HOME + SHIFT */
 
 /* "••" taps */
 static bool     fnc_was;
@@ -148,6 +160,29 @@ static void acid_load(int i)
 	acid_snap_pending = false;
 	pickup_all();
 }
+/* ---- HOME ---- */
+static void acid_load(int i);
+/* Scene i: its pattern (and the pattern's sound), its kit, which drums play, its swing, its
+ * tempo and its bus FX. The balance and the DJ filter are left where the hands put them. */
+static void scene_load(int i)
+{
+	const struct sp1_acid_scene *sc = sp1_acid_scene(i);
+	const struct sp1_acid_preset *ap = sp1_acid_preset(sc->pattern);
+	acid_load(sc->pattern);
+	sp1_dui_load_kit(sc->kit);
+	pt.mute = sc->mute;
+	pt.tempo = ap->bpm < TEMPO_MIN ? TEMPO_MIN : (ap->bpm > TEMPO_MAX ? TEMPO_MAX : ap->bpm);
+	stored[L_SET][0] = sc->swing;
+	stored[L_KIT_SH][0] = ap->fx[0];
+	stored[L_KIT_SH][1] = ap->fx[1];
+	stored[L_KIT_SH][2] = ap->fx[2];
+	stored[L_KIT_SH][3] = ap->fx[3];
+	stored[L_HOME][1] = ((float)sc->kit + 0.5f) / (float)SP1_DRUMS_KITS;
+	zh_kit = (int8_t)sc->kit;
+	scene_sel = i;
+	pickup_all();
+}
+
 /* Which pattern, on the row: T1-T4 are four groups of seven, the lit one full. */
 static void pat_glyph(int i, uint8_t lv[4])
 {
@@ -187,7 +222,8 @@ static bool bipolar(int l, int i)
 {
 	return l == L_KIT || (l == L_KIT_SH && i == 0)    /* KIT's offsets and fill, the filter */
 	       || l == L_LANE                              /* a lane's density: centred = as written */
-	       || (l == L_PAT && (i == 1 || i == 3));      /* transpose, sparse / dense              */
+	       || (l == L_PAT && (i == 1 || i == 3))       /* transpose, sparse / dense              */
+	       || (l == L_HOME && (i == 0 || i == 3));     /* balance, the DJ filter                 */
 }
 
 /* DRUM n + SHIFT F3 (the loop length) and the bass octave: zones of their faders. */
@@ -253,6 +289,9 @@ static int layer_of(enum sp1_dui_page p, bool shift)
 	if (p == SP1_DUI_PATTERN) {
 		return shift ? L_PAT_SH : L_PAT;
 	}
+	if (p == SP1_DUI_HOME) {
+		return shift ? L_SET : L_HOME;
+	}
 	return 2 * (int)p + (shift ? 1 : 0);
 }
 
@@ -295,6 +334,8 @@ static void page_glyph(enum sp1_dui_page p)
 		lv[2] = SP1_ENGINE_LED_FULL;
 	} else if (p == SP1_DUI_KIT) {
 		lv[3] = SP1_ENGINE_LED_FULL;
+	} else if (p == SP1_DUI_HOME) {
+		lv[0] = lv[1] = lv[2] = lv[3] = SP1_ENGINE_LED_FULL;
 	}
 	if (p != SP1_DUI_SETTINGS) {
 		flash(lv);                       /* SETTINGS says so by breathing */
@@ -325,6 +366,9 @@ void sp1_dui_load_kit(int k)
 		memcpy(stored[L_DRUM(v)], d.v[L_DRUM(v)], sizeof stored[0]);
 		memcpy(stored[L_DRUM_SH(v)], d.v[L_DRUM_SH(v)], sizeof stored[0]);
 	}
+	stored[L_HOME][1] = ((float)pt.kit + 0.5f) / (float)SP1_DRUMS_KITS;   /* HOME F2 follows */
+	zh_kit = (int8_t)pt.kit;
+	kit_pending = -1;
 	pickup_all();
 }
 
@@ -340,6 +384,9 @@ static void defaults(int k)
 		pt.bass_mode = (uint8_t)cfg.bass_mode;
 	}
 	acid_sel = -1;
+	scene_sel = -1;
+	zh_scene = zh_kit = -1;
+	kit_pending = -1;
 	pickup_all();
 }
 
@@ -348,8 +395,8 @@ void sp1_dui_init(void)
 	sp1_drums_cfg_defaults(&cfg);
 	cfg_applied = false;
 	defaults(0);
-	page = came_from = SP1_DUI_SOUND;
-	active = L_SOUND;
+	page = came_from = SP1_DUI_HOME;
+	active = L_HOME;
 	speed = 1.0f;
 }
 
@@ -387,6 +434,11 @@ void sp1_dui_put(const struct sp1_drums_patch *p)
 	memset(lane_len_was, -1, sizeof lane_len_was);
 	acid_snap_pending = false;
 	acid_sel = -1;                    /* the pattern fader follows the preset's line */
+	scene_sel = -1;                   /* ...and the scene fader the preset's */
+	zh_scene = -1;
+	stored[L_HOME][1] = ((float)pt.kit + 0.5f) / (float)SP1_DRUMS_KITS;   /* the kit fader its kit */
+	zh_kit = (int8_t)pt.kit;
+	kit_pending = -1;
 	pickup_all();
 }
 
@@ -397,7 +449,7 @@ static void enter_common(const uint16_t raw[4], bool fnc)
 		now01[i] = pos[i];
 	}
 	pickup_all();
-	page = came_from = SP1_DUI_SOUND;
+	page = came_from = SP1_DUI_HOME;
 	fnc_was = fnc;
 	press_dirty = true;
 	press_ms = 0u;
@@ -415,7 +467,7 @@ void sp1_dui_enter(const uint16_t raw[4])
 void sp1_dui_resume(const uint16_t raw[4], bool fnc)
 {
 	enter_common(raw, fnc);
-	page_glyph(SP1_DUI_SOUND);
+	page_glyph(SP1_DUI_HOME);
 }
 
 /* ---- one tick: taps, faders ---- */
@@ -459,25 +511,22 @@ uint32_t sp1_dui_tick(uint32_t elapsed_ms, const uint16_t raw[4], bool valid, bo
 				tap_count = 1;
 			}
 			since_tap_ms = 0u;
-			if (tap_count == 2 && page != SP1_DUI_SETTINGS) {
-				came_from = page;
-				page = SP1_DUI_SETTINGS;
-				ev |= SP1_DUI_EV_PAGE;
+			if (tap_count == 2) {
+				if (page != SP1_DUI_HOME) {
+					page = SP1_DUI_HOME;
+					ev |= SP1_DUI_EV_PAGE;
+					page_glyph(page);
+				}
 			} else if (tap_count == 3) {
-				page = SP1_DUI_SOUND;      /* coming back from MARBLES lands here */
+				page = SP1_DUI_HOME;       /* coming back from MARBLES lands here */
 				ev |= SP1_DUI_EV_PAGE | SP1_DUI_EV_TO_MARBLES;
 				tap_count = 0;
 				since_tap_ms = 0xFFFFFFFFu;
 			}
 		}
 	}
-	/* a lone tap on SETTINGS, once nothing followed it: back where we came from */
+	/* a lone tap, once nothing followed it, is nothing (the battery display is main's) */
 	if (!fnc && tap_count == 1 && since_tap_ms != 0xFFFFFFFFu && since_tap_ms > TAP_GAP_MS) {
-		if (page == SP1_DUI_SETTINGS) {
-			page = came_from;
-			ev |= SP1_DUI_EV_PAGE;
-			page_glyph(page);
-		}
 		tap_count = 0;
 		since_tap_ms = 0xFFFFFFFFu;
 	}
@@ -747,6 +796,7 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 	const bool on_kit = !k->marbles && page == SP1_DUI_KIT;
 	const bool on_set = !k->marbles && page == SP1_DUI_SETTINGS;
 	/* the acid line's three pages: T1 SOUND, T2 PATTERN, T3 LANES */
+	const bool home = !k->marbles && page == SP1_DUI_HOME;
 	const bool acid_page = !k->marbles && (page == SP1_DUI_SOUND || page == SP1_DUI_PATTERN ||
 					       page == SP1_DUI_LANES);
 	const bool ffwd_down = (k->held & BIT(SP1_BTN_FFWD)) != 0u;
@@ -840,14 +890,76 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 		}
 	}
 	if (ffwd_press) {
-		ffwd_eaten = fnc || on_set || acid_page;
+		ffwd_eaten = fnc || on_set || acid_page || home;
 		ffwd_ms = 0u;
 	}
 	if (rwd_press) {
-		rwd_eaten = fnc || on_set || acid_page;
+		rwd_eaten = fnc || on_set || acid_page || home;
 	}
 	if (ffwd_down) {
 		ffwd_ms += dt;
+	}
+
+	/* ---- HOME: the rocker glides the tempo; F2 the kit and F3 the scene, at the bar ---- */
+	if (home && !fnc) {
+		const int dir = (ffwd_down ? 1 : 0) - (rwd_down ? 1 : 0);
+		if (ffwd_press || rwd_press) {
+			tempo_ms = 0u;
+			pt.tempo += ffwd_press ? 1.0f : -1.0f;            /* a tap: one BPM */
+		} else if (dir != 0) {
+			tempo_ms += dt;
+			if (tempo_ms > TAP_MAX_MS) {                       /* held: a glide */
+				pt.tempo += (float)dir * TEMPO_GLIDE * (float)dt * 0.001f;
+			}
+		}
+		pt.tempo = pt.tempo < TEMPO_MIN ? TEMPO_MIN : (pt.tempo > TEMPO_MAX ? TEMPO_MAX : pt.tempo);
+		if ((k->released & (BIT(SP1_BTN_FFWD) | BIT(SP1_BTN_RWD))) && !ffwd_down && !rwd_down) {
+			LOG("TEMPO %d BPM\n", (int)(pt.tempo + 0.5f));
+		}
+	}
+	{
+		if (scene_sel < 0) {                       /* after a preset or the defaults */
+			scene_sel = zone_h(&zh_scene, stored[L_HOME][2], SP1_ACID_SCENES);
+			scene_pending = -1;
+		}
+		const int z = zone_h(&zh_scene, stored[L_HOME][2], SP1_ACID_SCENES);
+		const int waiting = scene_pending >= 0 ? scene_pending : scene_sel;
+		if (z != waiting) {
+			const struct sp1_acid_scene *sc = sp1_acid_scene(z);
+			const struct sp1_acid_preset *ap = sp1_acid_preset(sc->pattern);
+			uint8_t lv[4];
+			scene_pending = z;
+			pat_glyph(z, lv);
+			flash(lv);
+			const float bpm = ap->bpm < TEMPO_MIN ? TEMPO_MIN : (ap->bpm > TEMPO_MAX ? TEMPO_MAX : ap->bpm);
+			LOG("SCENE %d: %s, %s, %d BPM%s\n", z + 1, ap->name, sp1_drums_kit_name(sc->kit),
+			    (int)(bpm + 0.5f), bpm < ap->bpm ? " (written faster; HOME stops at 140)" : "");
+		}
+		const int kz = zone_h(&zh_kit, stored[L_HOME][1], SP1_DRUMS_KITS);
+		if (scene_pending < 0 && kz != pt.kit && kz != kit_pending) {
+			uint8_t lv[4];
+			kit_pending = kz;
+			kit_glyph(kz, lv);
+			flash(lv);
+			LOG("KIT %d: %s\n", kz + 1, sp1_drums_kit_name(kz));
+		}
+		if (scene_pending >= 0 || kit_pending >= 0) {
+			struct sp1_drums_status st;
+			sp1_drums_status(&st);
+			if (st.step < 0 || (st.step == 0 && home_step_was != 0)) {
+				if (scene_pending >= 0) {
+					scene_load(scene_pending);
+					scene_pending = -1;
+					kit_pending = -1;
+				} else {
+					sp1_dui_load_kit(kit_pending);
+					kit_pending = -1;
+				}
+			}
+			home_step_was = st.step;
+		} else {
+			home_step_was = -1;
+		}
 	}
 
 	/* ---- the acid line's pattern: PATTERN F1 (and "••" + the rocker), taken up at the bar ---- */
@@ -1024,7 +1136,7 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 	rest_write = 0u;
 	rest_erase = 0u;
 	bool tape = false;
-	if (run && !on_set && !acid_page) {
+	if (run && !on_set && !acid_page && !home) {
 		if (on_kit) {
 			tape = rwd_down && !rwd_eaten && !fnc;
 			if (ffwd_press && !fnc) {
@@ -1052,7 +1164,7 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 
 	/* ---- stopped ---- */
 	burst = false;
-	if (!run && !on_set && !acid_page) {
+	if (!run && !on_set && !acid_page && !home) {
 		if (rwd_press && !fnc) {
 			if (drum_page) {
 				act |= SP1_DUI_ACT_TRIG;
@@ -1123,6 +1235,10 @@ const char *sp1_dui_log(void)
 void sp1_dui_ctl(struct sp1_drums_ctl *o)
 {
 	memset(o, 0, sizeof *o);
+	/* HOME F1: the balance. Centred, both at full; down, the line fades out; up, the drums. */
+	const float bal = detent(stored[L_HOME][0], DETENT_BIPOLAR);
+	const float drums_gain = bal <= 0.5f ? 1.0f : 2.0f * (1.0f - bal);
+	const float line_gain = bal >= 0.5f ? 1.0f : 2.0f * bal;
 	const float *kb = stored[L_KIT];
 	const float semis_f = (2.0f * detent(kb[0], DETENT_BIPOLAR) - 1.0f) * 12.0f;
 	const float semis = (float)(int)(semis_f + (semis_f >= 0.0f ? 0.5f : -0.5f));
@@ -1139,7 +1255,7 @@ void sp1_dui_ctl(struct sp1_drums_ctl *o)
 		o->decay[v] = clamp01(b[2] + d_decay);
 		o->mod[v] = clamp01(b[3]);
 		o->excite[v] = clamp01(sh[3]);
-		o->level[v] = pt.gain[v] * 2.0f * clamp01(sh[1]);
+		o->level[v] = pt.gain[v] * 2.0f * clamp01(sh[1]) * drums_gain;
 		o->density[v] = clamp01(sh[0]);
 		o->len[v] = kLen[zone_h(&zh_len[v], sh[2], 5)];
 		o->pat[v] = pt.pat[v];
@@ -1206,7 +1322,7 @@ void sp1_dui_ctl(struct sp1_drums_ctl *o)
 		o->acid_p[8] = clamp01(ps[1]);
 		o->acid_p[10] = clamp01(ps[2]);
 		/* level: 0.7 on the fader is -6 dB in the mix, the top 0 dB; drums.cnfg trims it */
-		o->acid_level = 2.5f * clamp01(ps[3]) * clamp01(ps[3]) *
+		o->acid_level = 2.5f * clamp01(ps[3]) * clamp01(ps[3]) * line_gain *
 				powf(10.0f, (cfg.acid_level_db + 12.0f) / 20.0f);
 		o->acid_duck = cfg.acid_duck;
 		/* PATTERN: F2 transpose (+-12 semitones, centred = none), F3 the octave (five zones) */
@@ -1232,7 +1348,9 @@ void sp1_dui_ctl(struct sp1_drums_ctl *o)
 	o->melodic = pt.melodic;
 	o->mute = pt.mute;
 	o->fx_on = pt.fx_on;
-	o->fx[0] = detent(stored[L_KIT_SH][0], DETENT_BIPOLAR);
+	/* the DJ filter: KIT + SHIFT F1 and HOME F4 add up (each centred = off) */
+	o->fx[0] = clamp01(detent(stored[L_KIT_SH][0], DETENT_BIPOLAR) +
+			   detent(stored[L_HOME][3], DETENT_BIPOLAR) - 0.5f);
 	o->fx[1] = clamp01(stored[L_KIT_SH][1]);
 	o->fx[2] = clamp01(stored[L_KIT_SH][2]);
 	o->fx[3] = clamp01(stored[L_KIT_SH][3]);
@@ -1250,6 +1368,7 @@ void sp1_dui_ctl(struct sp1_drums_ctl *o)
 }
 
 float sp1_dui_speed(void) { return speed; }
+float sp1_dui_tempo(void) { return pt.tempo >= TEMPO_MIN && pt.tempo <= TEMPO_MAX ? pt.tempo : 120.0f; }
 
 /* ---- LEDs ---- */
 static void leds_of(int l, uint8_t out[4])
@@ -1273,7 +1392,7 @@ void sp1_dui_leds(uint8_t out[4])      { leds_of(active, out); }
 void sp1_dui_page_leds(uint8_t out[4]) { leds_of(layer_of(page, false), out); }
 
 enum sp1_dui_page sp1_dui_page(void) { return page; }
-bool sp1_dui_shift(void) { return (active & 1) && active != L_SET; }
+bool sp1_dui_shift(void) { return (active & 1) || active == L_SET; }
 int  sp1_dui_kit(void) { return pt.kit; }
 
 const char *sp1_dui_page_name(enum sp1_dui_page p)
@@ -1288,6 +1407,7 @@ const char *sp1_dui_page_name(enum sp1_dui_page p)
 	case SP1_DUI_LANES:    return "lanes";
 	case SP1_DUI_SOUND:    return "sound";
 	case SP1_DUI_PATTERN:  return "pattern";
+	case SP1_DUI_HOME:     return "home";
 	default:               return "?";
 	}
 }

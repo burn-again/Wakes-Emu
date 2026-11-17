@@ -408,6 +408,22 @@ struct sp1_acid_event sp1_acid_seq_step(struct sp1_acid_seq *q, const struct sp1
 	return e;
 }
 
+/* The kit each pattern was rendered over (tools/host-tests/drumtest.cc), and which drums play. */
+static const struct sp1_acid_scene kScenes[SP1_ACID_SCENES] = {
+	{  0, 0, 0x0A, 0.0f }, {  1, 4, 0x0A, 0.0f }, {  2, 5, 0x0A, 0.0f }, {  3, 0, 0x0A, 0.0f },
+	{  4, 3, 0x0A, 0.0f }, {  5, 4, 0x0A, 0.0f }, {  6, 2, 0x0A, 0.0f }, {  7, 0, 0x0A, 0.0f },
+	{  8, 1, 0x00, 0.0f }, {  9, 2, 0x0A, 0.0f }, { 10, 0, 0x08, 0.0f }, { 11, 2, 0x0A, 0.0f },
+	{ 12, 0, 0x0A, 0.0f }, { 13, 7, 0x0E, 0.0f }, { 14, 3, 0x0A, 0.0f }, { 15, 0, 0x0A, 0.0f },
+	{ 16, 4, 0x0A, 0.0f }, { 17, 0, 0x0A, 0.0f }, { 18, 4, 0x00, 0.0f }, { 19, 1, 0x08, 0.7f },
+	{ 20, 0, 0x0A, 0.0f }, { 21, 5, 0x0A, 0.0f }, { 22, 2, 0x08, 0.4f }, { 23, 3, 0x0A, 0.0f },
+	{ 24, 1, 0x00, 0.0f }, { 25, 5, 0x0A, 0.0f }, { 26, 3, 0x08, 0.0f },
+};
+
+const struct sp1_acid_scene *sp1_acid_scene(int i)
+{
+	return &kScenes[i >= 0 && i < SP1_ACID_SCENES ? i : 0];
+}
+
 const struct sp1_acid_preset *sp1_acid_preset(int i)
 {
 	return &kPresets[i >= 0 && i < SP1_ACID_PRESETS ? i : 0];

@@ -15,26 +15,28 @@ battery display, VOL, USB audio and MIDI, PRST slots (`••` + PLAY), the rip 
 
 ## Pages
 
-The row of four buttons is the map. **T*n* alone** opens one of four pages; **`••` + T*n***
-opens drum *n*. The device starts on **SOUND**, with the acid line on pattern 1 over the
-kick and the hat (drums 2 and 4 muted).
+The device starts on **HOME**, where the presets are shuffled; from there the row of four
+buttons dives in: **T*n* alone** opens one of four pages, **`••` + T*n*** opens drum *n*.
+That is eight pages, each with a SHIFT layer. A **`••` double tap** returns to HOME from any
+of them. At power-on the acid line plays pattern 1 over the kick and the hat (drums 2 and 4
+muted), at 120 BPM.
 
 | page | how you get there | its own button again |
 |---|---|---|
-| **SOUND** | **T1** (and at power-on) | T1: the acid line **off / on** |
+| **HOME** | power-on; **`••` double tap** from anywhere | — |
+| **SOUND** | **T1** | T1: the acid line **off / on** |
 | **PATTERN** | **T2** | — |
 | **LANES** | **T3** | — |
 | **KIT** | **T4** | — |
 | **DRUM 1–4** | **`••` + T1–T4** | `••` + T*n*: **mute / unmute** drum *n* |
-| **SETTINGS** | `••` double tap | one `••` tap → the page you came from |
-| **MARBLES** | `••` triple tap | `••` triple tap → SOUND |
+| **MARBLES** | `••` triple tap | `••` triple tap → HOME |
 
 - A **tap** is a `••` press under 300 ms with nothing else touched; the next tap must start
-  within 400 ms. The second tap opens SETTINGS at once and a third goes to MARBLES, so a
-  single tap on SETTINGS only leaves once those 400 ms have passed.
+  within 400 ms. The second tap opens HOME at once and a third goes to MARBLES. A single
+  tap does nothing here (it shows the battery, as in Wakes).
 - **Holding `••`** shows the page's SHIFT layer.
 - Entering a page flashes its button's LED (a drum's page: its LED over a half-lit row);
-  SETTINGS breathes. The row then shows the page's four values, as in Wakes.
+  HOME lights all four. The row then shows the page's four values, as in Wakes.
 - Pickup is Wakes': a fader that does not match the value it is showing catches up rather
   than jumping, on every page.
 
@@ -42,6 +44,8 @@ kick and the hat (drums 2 and 4 muted).
 
 | page | F1 | F2 | F3 | F4 |
 |---|---|---|---|---|
+| **HOME** | **drums ↔ line** | **kit** (8) | **scene** (27) | **DJ filter** (centre off, down low-pass, up high-pass) |
+| **HOME + SHIFT** | **swing** | **morph** | FM carrier pitch (±3 octaves around G3) | bus drive (×1 … ×4 into the soft clip) |
 | **SOUND** (T1) | **cutoff** | **resonance** | **decay** | **drive** |
 | **SOUND + SHIFT** | envelope depth | accent | slide time | gate length |
 | **PATTERN** (T2) | **pattern** (28 zones) | **transpose**, ±12 semitones | **octave**, −2 … +2 | **sparse ↔ dense** |
@@ -52,8 +56,27 @@ kick and the hat (drums 2 and 4 muted).
 | **KIT + SHIFT** | DJ filter (centre off, down low-pass, up high-pass) | wavefolder | Chebyshev | through-zero FM |
 | **DRUM *n*** (`••` + T*n*) | pitch | tone | decay | mod |
 | **DRUM *n* + SHIFT** | **density** | level | **length** | excite |
-| **SETTINGS** | **swing** | **morph** | FM carrier pitch (±3 octaves around G3) | bus drive (×1 … ×4 into the soft clip) |
-| **SETTINGS + SHIFT** | **bass octave** (5 steps, −2 … +2) | **bass shape** (saw → square → triangle) | **bass cutoff** | **bass decay** |
+
+### HOME
+
+- **The rocker is the tempo**, 20–140 BPM for the whole machine (Marbles' clock, so the
+  drums and the line together): a tap is one BPM, held it glides 20 BPM a second. The log
+  says where it stopped (`TEMPO 96 BPM`). It starts at 120 and is kept in the PRST slot.
+  Marbles' own RATE fader and range no longer set the tempo; MIDI clock still does.
+- **F1, drums ↔ line**: centred (detent) both play at full; down the line fades out, up the
+  drums do.
+- **F2, kit**: the eight kits, with hysteresis, taken up at the next bar line. KIT's
+  `••` + FFWD / RWD moves this fader with it.
+- **F3, scene**: one per built-in pattern (27), taken up at the next bar line. A scene is
+  the pattern with its sound, the kit and the drums it was rendered over, its swing, its
+  tempo and its bus FX amounts; the balance and the DJ filter stay where your hands left
+  them. Jungle (165), thrash (180) and footwork (160) were written faster than HOME's 140,
+  so they play at 140 (the log says so).
+- **F4, DJ filter**: adds to KIT + SHIFT F1, so it sweeps whatever the kit page set.
+- **HOME + SHIFT** is what SETTINGS was. SETTINGS' buttons are gone: the mutes are
+  `••` + T*n* on a drum page, the rest style is drums.cnfg's `rest_style`, the old Y / rests
+  bass is drums.cnfg's `[bass]` with `[acid] start = off`, and the pattern swap between kits
+  is no longer reachable.
 
 - **SOUND**'s four are the ones whose moves are recorded (keep / undo / snap back, below).
 - **PATTERN F1** chooses the pattern: 28 zones along the fader, with hysteresis. The row
@@ -86,24 +109,22 @@ drum's threshold, so one map holds the groove and all its ghost notes at once:
 - **length** (DRUM *n* + SHIFT F3) is the loop, in five zones: **8, 12, 16, 24, 32 steps**. A
   map shorter than the loop repeats; a 16-step loop over a 32-step map plays its first half.
   Drums with different lengths drift against each other (polymeter).
-- **morph** (SETTINGS F2) blends every drum from map A to map B, weight by weight.
-- **swing** (SETTINGS F1) delays the odd 16ths, up to a third of a step.
+- **morph** (HOME + SHIFT F2) blends every drum from map A to map B, weight by weight.
+- **swing** (HOME + SHIFT F1) delays the odd 16ths, up to a third of a step.
 - Marbles' **JITTER** (t page F3) wobbles each step's threshold and each hit's tone and decay;
   its **DEJA VU** (F4) decides how much of that randomness repeats: below the middle, part of it
   is drawn fresh each time the loop comes round; at or above the middle, the loop repeats.
-- The sequencer follows Marbles' clock: RATE, the ×¼ / ×1 / ×4 range, MIDI clock, tape slow.
+- The sequencer follows Marbles' clock, at HOME's tempo (or MIDI clock), bent by tape slow.
 
-**SETTINGS `••` + T1–T4** swaps drum *n*'s maps for the **next kit's** maps for that drum (the
-row flashes, the console names it: `PATTERN drum 1: 8-bit breaks's (16 steps)`). The voice stays
-the same, so you can play one kit's sounds with another kit's grooves. The length fader resets
-to the new map's length.
+(Swapping one drum's maps for another kit's, which SETTINGS `••` + T*n* did, is no longer on
+a button.)
 
 ## The bass
 
 A mono bass (saw / square / triangle with a sub-octave, a resonant low-pass with its own
 envelope, glide) that plays **notes from Marbles' scale**, chosen by Marbles' **Y** output.
-
-**SETTINGS `••` + FFWD / RWD** steps the mode:
+It is heard only when the acid line is not: with `[acid] start = off` in drums.cnfg, its
+`[bass] mode` decides, and a preset can carry it (`line = y`). It has no page any more:
 
 | mode | the bass plays |
 |---|---|
@@ -115,8 +136,8 @@ envelope, glide) that plays **notes from Marbles' scale**, chosen by Marbles' **
   default is one every 8 beats.
 - The **scale** is Marbles' selected one (`••` + FFWD / RWD on Marbles' X page). Y spans two
   octaves of it from the root (`drums.cnfg` sets the root and how many octaves).
-- SETTINGS + SHIFT shapes it: octave, shape, cutoff, decay. Resonance, envelope amount, glide,
-  sub level and the bass level in the mix are in `drums.cnfg`.
+- Its octave, shape, cutoff and decay are a preset's `settings_shift` line; resonance,
+  envelope amount, glide, sub level and the bass level in the mix are in `drums.cnfg`.
 - A t output cabled to **bass** strikes it too, in any mode except off.
 
 ## The acid line
@@ -160,9 +181,6 @@ any of the three pages; **T1 on SOUND** switches the line off and on. There are 
 - A pattern brings its sound: SOUND, SOUND + SHIFT and PATTERN + SHIFT's wave, sub and FM are
   set to the pattern's own values when it is taken up (the faders catch up from there). The
   pattern fader, transpose, octave, sparse ↔ dense and level stay where they are.
-- **SETTINGS `••` + FFWD / RWD** steps what plays the bass part: the acid line, nothing, the
-  old bass on the Y clock, the old bass in the rests (`LINE off`, `LINE acid 3: sixth-form
-  (101)`). SETTINGS + SHIFT is always the old bass's four.
 - It runs on the sequencer's 16ths, with the swing, and through the bus FX with the kit.
 - **The kick ducks its cutoff**: each hit on slot 1 dips it (`duck` in drums.cnfg, half an
   octave) and it comes back over about a tenth of a second.
@@ -214,8 +232,7 @@ On **SOUND, PATTERN and LANES, the rocker without `••`** is:
   pattern drops the takes and starts a new home.
 - After a snap back the faders catch up from home, as after any page change.
 - Takes are not saved in the PRST slot, and nothing is kept while the clock is stopped.
-- On KIT and the drum pages the rocker is the rhythm tricks below, and on SETTINGS the rest
-  style, as before.
+- On KIT and the drum pages the rocker is the rhythm tricks below; on HOME it is the tempo.
 
 What it is for (`drumtest` renders each as `jam*.wav`):
 
@@ -288,12 +305,12 @@ that output goes back to none.
 
 ## Buttons
 
-| control | SOUND · PATTERN · LANES | KIT | DRUM *n* | SETTINGS |
+| control | HOME | SOUND · PATTERN · LANES | KIT | DRUM *n* |
 |---|---|---|---|---|
-| **T1–T4** | open SOUND · PATTERN · LANES · KIT (T1 on SOUND: the line off / on) | the same | the same | **mute / unmute** drum *n* |
-| **`••` + T1–T4** | open DRUM *n* | open DRUM *n* | open DRUM *n*; its own: **mute / unmute** it | drum *n*'s **pattern** → the next kit's maps |
-| **`••` + FFWD / RWD** | **next / previous acid pattern** (at the bar) | **next / previous kit** | **next / previous model** | **the line**: acid / off / bass on Y / bass in the rests |
-| **FFWD / RWD** | **keep / undo** (tap), **add / snap back** (held) | the rhythm tricks, below | the same, for that drum | rests: ring out / choke |
+| **T1–T4** | open SOUND · PATTERN · LANES · KIT | the same (T1 on SOUND: the line off / on) | the same | the same |
+| **`••` + T1–T4** | open DRUM *n* | open DRUM *n* | open DRUM *n* | open DRUM *n*; its own: **mute / unmute** it |
+| **`••` + FFWD / RWD** | — | **next / previous acid pattern** (at the bar) | **next / previous kit** | **next / previous model** |
+| **FFWD / RWD** | **tempo**: tap ±1 BPM, held a glide | **keep / undo** (tap), **add / snap back** (held) | the rhythm tricks, below | the same, for that drum |
 | **PLAY** | Marbles' clock run / stop | the same | the same | the same |
 
 - The four bus FX are always in the path: at zero they do nothing (KIT + SHIFT). The
@@ -315,7 +332,6 @@ that output goes back to none.
 |---|---|---|---|---|
 | **KIT** | held: **tape slow** | tap: **rotate the kit** | press: **step one 16th** | held: **burst** |
 | **DRUM *n*** | held: **rest drum *n*** | held: **release** drum *n*'s rests; tap: **clear** them at the next bar | press: **audition** drum *n* | held: **burst drum *n*** |
-| **SETTINGS** | press: rests **choke** | press: rests **ring out** | the same | the same |
 | **MARBLES** | held: **rest every drum** | held: release every drum; tap: clear all at the next bar | press: step one 16th | held: burst |
 
 On MARBLES the clock range (`[B]`, ×¼ / ×1 / ×4) moves to **`••` + FFWD / RWD on the t page**,

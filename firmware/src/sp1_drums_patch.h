@@ -35,7 +35,7 @@
 extern "C" {
 #endif
 
-#define SP1_DRUMS_LAYERS 18      /* KIT, DRUM 1-4, SETTINGS, LANES, SOUND, PATTERN: each with its SHIFT */
+#define SP1_DRUMS_LAYERS 19      /* KIT, DRUM 1-4, SETTINGS, LANES, SOUND, PATTERN with their SHIFT, and HOME */
 
 struct sp1_drums_patch {
 	bool present;                 /* the slot had a [drums] section                    */
@@ -45,6 +45,7 @@ struct sp1_drums_patch {
 	uint8_t melodic, fx_on, mute, rest_choke, bass_mode;
 	uint8_t pat[4];               /* 0..7 */
 	uint8_t t_dest[4], x_dest[4];
+	float tempo;                  /* BPM, 20..140: HOME's rocker                        */
 	float v[SP1_DRUMS_LAYERS][4]; /* the pages' stored values, 0..1                    */
 };
 

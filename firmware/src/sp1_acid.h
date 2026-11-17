@@ -114,6 +114,17 @@ struct sp1_acid_preset {
 uint8_t sp1_acid_len_zone(int zone);            /* 2 3 4 5 6 8 12, then 0 = the pattern's */
 int     sp1_acid_len_zone_of(uint8_t len);      /* the zone nearest a length              */
 const struct sp1_acid_preset *sp1_acid_preset(int i);          /* 0 .. SP1_ACID_PRESETS-1 */
+
+/* ---- scenes: HOME F3. One per built-in pattern, with the kit and the drums that suit it;
+ * the tempo and the bus FX are the pattern's own (bpm, fx). ---- */
+#define SP1_ACID_SCENES SP1_ACID_BUILTIN
+struct sp1_acid_scene {
+	uint8_t pattern;              /* a built-in pattern                                  */
+	uint8_t kit;                  /* 0..7                                                */
+	uint8_t mute;                 /* bit n: drum n waits                                 */
+	float   swing;                /* 0..1                                                */
+};
+const struct sp1_acid_scene *sp1_acid_scene(int i);            /* 0 .. SP1_ACID_SCENES-1  */
 const struct sp1_acid_pattern *sp1_acid_pattern_of(int i);     /* its parsed pattern       */
 /* drums.cnfg's [acid] line: the user pattern. Returns as sp1_acid_parse. */
 int sp1_acid_set_user(const char *text, size_t len);
