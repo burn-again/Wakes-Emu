@@ -481,14 +481,14 @@ west build -p always -b stem_player wakes-sp1/firmware -d build-drums \
 python wakes-sp1/tools/ci/check_image.py build-drums
 ```
 
-Built that way with the pinned Zephyr v4.3.1 and SDK 0.17.4 (2026-11-14, this branch): no
-warnings, every `check_image.py` check passes, and the image is **610,784 B** (66.9 % of the
-slot) with **167,880 B** of RAM (64.0 %). The acid line and its pages are 21.8 KB of that
-flash and 12.8 KB of that RAM (the drum firmware before them: 588,944 B and 155,080 B). With `CONFIG_SP1_DRUMS`
+Built that way with the pinned Zephyr v4.3.1 and SDK 0.17.4 (2026-11-17, this branch): no
+warnings, every `check_image.py` check passes, and the image is **613,692 B** (67.2 % of the
+slot) with **168,008 B** of RAM (64.1 %). The acid line and its pages are 24.7 KB of that
+flash and 12.9 KB of that RAM (the drum firmware before them: 588,944 B and 155,080 B). With `CONFIG_SP1_DRUMS`
 off, the image is the base's byte for byte apart from the build time (compared at the same
 source and build paths; the build directory's name moves 8 bytes of padding otherwise).
 CI does not build this configuration. The 2026-11-13 build of this branch booted and played
-on an SP-1; the page rework after it has run in the emulator only.
+on an SP-1; the page rework and HOME after it have run in the emulator only.
 
 ## CPU
 
