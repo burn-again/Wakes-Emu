@@ -901,6 +901,13 @@ static void drums_watch(bool running)
 		       st.shed - shed_was == 1u ? "" : "s", st.shed);
 		shed_was = st.shed;
 	}
+	static uint32_t lite_was, lite_ms;
+	if (st.acid_lite != lite_was && k_uptime_get_32() - lite_ms >= 1000u) {
+		lite_ms = k_uptime_get_32();
+		printk("CPU guard: the acid filter at one pass %u time%s (%u since ON)\n",
+		       st.acid_lite - lite_was, st.acid_lite - lite_was == 1u ? "" : "s", st.acid_lite);
+		lite_was = st.acid_lite;
+	}
 	if (st.hits != hits_was) {
 		if (!running) {
 			printk("HIT drums 0x%x (%u)\n", st.last_hits, st.hits - hits_was);
@@ -1374,6 +1381,27 @@ static void prst_select(int slot)
 	       sp1_pui_offlist(sp1_pui_slot()) ? " (not on the engine list)" : "");
 }
 
+static void prst_gather(struct sp1_prst *p);
+
+#if defined(CONFIG_SP1_DRUMS)
+/* HOME "••" + RWD held: the current slot to the drive now, while playing. The storage thread
+ * writes it beside the log; the shutdown save still follows. */
+static void prst_write_now(void)
+{
+	if (!prst_available()) {
+		printk("PRST write: not possible (storage not ready) -- nothing written\n");
+		return;
+	}
+	struct sp1_prst p;
+	prst_gather(&p);
+	if (sp1_store_prst_save_live(g_prst_slot, &p)) {
+		printk("PRST write slot %d: writing\n", g_prst_slot + 1);
+	} else {
+		printk("PRST write: the last write is still going -- try again\n");
+	}
+}
+#endif
+
 static void prst_gather(struct sp1_prst *p)
 {
 	sp1_pui_get(&p->plaits);
@@ -1407,6 +1435,12 @@ static void storage_at_shutdown(void)
 		g_prst_on = false;
 		struct sp1_prst p;
 		prst_gather(&p);
+		/* a write from HOME may still be in flight: let it finish, it is the same slot */
+		while (sp1_store_save_result() == SP1_STORE_SAVE_BUSY &&
+		       k_uptime_get_32() - t0 < SP1_PRST_SAVE_MS / 2u) {
+			sp1_wdt_feed();
+			k_msleep(TICK_MS);
+		}
 		if (!sp1_store_prst_save(g_prst_slot, &p)) {
 			printk("PRST save: not possible (storage not ready) -- nothing saved\n");
 			sp1_store_log_end();
@@ -2484,8 +2518,12 @@ int main(void)
 					if (shutdown_active || rip_ms > 0u || prst_showing) {
 						keys.pressed = keys.released = 0u;   /* the gesture owns them */
 					}
-					if (sp1_dui_keys(dt, &keys) & SP1_DUI_ACT_TRIG) {
+					const uint32_t act = sp1_dui_keys(dt, &keys);
+					if (act & SP1_DUI_ACT_TRIG) {
 						sp1_synth_trigger();
+					}
+					if (act & SP1_DUI_ACT_WRITE) {
+						prst_write_now();
 					}
 					drums_drain();
 					drums_watch(running);

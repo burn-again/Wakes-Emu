@@ -1480,6 +1480,7 @@ static char load_text[SP1_PRST_TEXT_MAX];          /* this thread's */
 static char save_text[SP1_PRST_TEXT_MAX];          /* main fills it, then queues */
 static size_t save_len;
 static int save_slot;
+static volatile bool save_live;       /* sp1_store_prst_save_live: leave the log running */
 
 static int lower_c(int c)
 {
@@ -1686,9 +1687,11 @@ static void job_save(void)
 	     rc == 0 ? "done" : "FAILED", rc, (unsigned)(k_uptime_get_32() - t0));
 	atomic_set(&save_state, rc == 0 ? SP1_STORE_SAVE_OK : SP1_STORE_SAVE_FAILED);
 	/* Then the log's last lines (Adara: the save first, the log in the time left); main
-	 * waits for sp1_store_log_live() to drop. */
+	 * waits for sp1_store_log_live() to drop. A save while ON leaves the log as it is. */
 	if (log_live) {
-		log_end();
+		if (!save_live) {
+			log_end();
+		}
 	} else {
 		unmount_vol();
 		if (!stop) {
@@ -2037,11 +2040,26 @@ const struct sp1_prst *sp1_store_prst_slot(int slot)
 	return &prst_slot[(slot >= 0 && slot < SP1_PRST_SLOTS) ? slot : 0];
 }
 
+static bool prst_save_queue(int slot, const struct sp1_prst *p, bool live);
+
+bool sp1_store_prst_save_live(int slot, const struct sp1_prst *p)
+{
+	return prst_save_queue(slot, p, true);
+}
+
 bool sp1_store_prst_save(int slot, const struct sp1_prst *p)
+{
+	return prst_save_queue(slot, p, false);
+}
+
+static bool prst_save_queue(int slot, const struct sp1_prst *p, bool live)
 {
 	if (atomic_get(&prst_state) != SP1_STORE_PRST_READY || slot < 0 ||
 	    slot >= SP1_PRST_SLOTS) {
 		return false;
+	}
+	if (atomic_get(&save_state) == SP1_STORE_SAVE_BUSY) {
+		return false;                 /* a live save is still writing save_text */
 	}
 	int n = sp1_prst_write(p, save_text, sizeof(save_text));
 	if (n < 0) {
@@ -2059,6 +2077,7 @@ bool sp1_store_prst_save(int slot, const struct sp1_prst *p)
 #endif
 	save_len = (size_t)n;
 	save_slot = slot;
+	save_live = live;
 	prst_slot[slot] = *p;
 	atomic_set(&save_state, SP1_STORE_SAVE_BUSY);   /* a barrier: the text is in place */
 	atomic_or(&pending, JOB_SAVE);

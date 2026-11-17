@@ -115,6 +115,8 @@ void ta_note(ta_voice *v, float note, unsigned flags) {
 
 void ta_gate_off(ta_voice *v) { v->gate = 0; }
 
+void ta_lite(ta_voice *v, int on) { v->lite = (uint8_t)(on ? 1 : 0); }
+
 void ta_duck(ta_voice *v, float oct) { v->duck = clampf(v->duck + oct, 0.0f, 6.0f); }
 
 /* The rates that only change with a setting, an accent or the block length. */
@@ -196,7 +198,8 @@ void ta_render_mix(ta_voice *restrict v, float *restrict out, unsigned n, float 
                   + r->keytrack * (v->note - 48.0f) * (1.0f / 12.0f) - v->duck;
   const float fc = clampf(50.0f * exp2_fast(oct), 20.0f, 16000.0f);
   v->fc = fc;
-  const float x = fc * (3.14159265f / (SR * (float)TA_OS)), x2 = x * x;
+  const int os = v->lite ? 1 : TA_OS;
+  const float x = fc * (3.14159265f / (SR * (float)os)), x2 = x * x;
   const float g1 = x * (1.0f + x2 * (0.33333333f + x2 * (0.13333333f + x2 * 0.05396825f)));   /* tan */
   const float k = v->p[TA_RES] * r->kmax;
   const ta_coef c1 = coef(g1, r->pole1, k);
@@ -219,7 +222,7 @@ void ta_render_mix(ta_voice *restrict v, float *restrict out, unsigned n, float 
   const float post = 1.0f + drive * r->drive_post;
   const float og = gain * 0.9f / (1.0f + 0.35f * drive * r->drive_post);
   const float pole1 = r->pole1;
-  const float hp_a = r->fb_hp * (6.2831853f / (SR * (float)TA_OS));
+  const float hp_a = r->fb_hp * (6.2831853f / (SR * (float)os));
   const float atk_step = v->atk_step, amp_sus = v->gate ? v->amp_sus : 0.0f;
   const float amp_k = v->gate ? v->amp_kd : v->amp_kr;
   const float accg_t = v->accg_t;
@@ -257,7 +260,8 @@ void ta_render_mix(ta_voice *restrict v, float *restrict out, unsigned n, float 
       c.G += dc.G; c.G1 += dc.G1; c.ia += dc.ia; c.ib += dc.ib; c.D += dc.D;
     }
 #if TA_OS == 2
-    { const float xm = 0.5f * (x1 + osc); float ya; LADDER(xm); ya = y; LADDER(osc); y = 0.5f * (ya + y); }
+    if (os == 2) { const float xm = 0.5f * (x1 + osc); float ya; LADDER(xm); ya = y; LADDER(osc); y = 0.5f * (ya + y); }
+    else LADDER(osc);
 #else
     LADDER(osc);
 #endif

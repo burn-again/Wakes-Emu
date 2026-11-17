@@ -86,6 +86,7 @@ struct sp1_drums_status {
 	uint32_t bass_notes;      /* bass notes since boot                             */
 	uint32_t shed;            /* tails faded by the CPU guard since boot           */
 	uint8_t  acid_takes;      /* recorded fader takes looping now, 0..4            */
+	uint32_t acid_lite;       /* times the acid voice's filter went to one pass under load */
 	float    acid_now[4];     /* cutoff, resonance, decay, drive as the voice has   */
 	                          /* them this block: the faders plus the takes         */
 };

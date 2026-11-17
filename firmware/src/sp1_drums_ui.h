@@ -80,6 +80,7 @@ struct sp1_dui_keys {
 	uint16_t pressed, held, released;
 };
 #define SP1_DUI_ACT_TRIG       0x01u    /* main: sp1_synth_trigger() (an audition)          */
+#define SP1_DUI_ACT_WRITE      0x02u    /* main: write the current PRST slot to the drive now */
 uint32_t sp1_dui_keys(uint32_t elapsed_ms, const struct sp1_dui_keys *k);
 /* What main should do this tick, after sp1_dui_keys. */
 bool sp1_dui_burst(void);                 /* FFWD burst wanted                          */

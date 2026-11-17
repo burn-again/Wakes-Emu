@@ -67,6 +67,12 @@ static int     scene_sel = -1, scene_pending = -1;    /* -1: take it from the fa
 static int     kit_pending = -1;
 static int8_t  home_step_was = -1;
 static uint32_t tempo_ms;                              /* how long the rocker has been held  */
+/* HOME + "••": temp is what played before the last randomise; undo goes back to it. Both
+ * land on the next bar line. */
+static struct sp1_drums_patch temp;
+static bool     temp_ok, random_pending, undo_pending;
+static uint32_t rnd = 0x2545F491u, rw_fn_ms;
+static bool     rw_fn_done;
 
 static enum sp1_dui_page page = SP1_DUI_HOME;
 static enum sp1_dui_page came_from = SP1_DUI_HOME;    /* unused since SETTINGS became HOME + SHIFT */
@@ -180,6 +186,71 @@ static void scene_load(int i)
 	stored[L_HOME][1] = ((float)sc->kit + 0.5f) / (float)SP1_DRUMS_KITS;
 	zh_kit = (int8_t)sc->kit;
 	scene_sel = i;
+	pickup_all();
+}
+
+static float rnd01(void)
+{
+	rnd ^= rnd << 13; rnd ^= rnd >> 17; rnd ^= rnd << 5;
+	return (float)(rnd >> 8) * (1.0f / 16777216.0f);
+}
+static float rnd_in(float a, float b) { return a + (b - a) * rnd01(); }
+static float near(float v, float by, float lo, float hi)
+{
+	v += rnd_in(-by, by);
+	return v < lo ? lo : (v > hi ? hi : v);
+}
+
+/* A scene other than this one, then every performance page moved a little from it: the
+ * sound and the lanes near the scene's own, a transpose that stays in key more often than
+ * not, now and then a lane of another length, a little filter FM or some swing. */
+static void randomise(void)
+{
+	int i = (int)(rnd01() * (float)SP1_ACID_SCENES);
+	if (i >= SP1_ACID_SCENES) {
+		i = SP1_ACID_SCENES - 1;
+	}
+	if (i == scene_sel) {
+		i = (i + 1 + (int)(rnd01() * (float)(SP1_ACID_SCENES - 1))) % SP1_ACID_SCENES;
+	}
+	scene_load(i);
+	stored[L_HOME][2] = ((float)i + 0.5f) / (float)SP1_ACID_SCENES;   /* F3 shows it */
+	zh_scene = (int8_t)i;
+	float *sd = stored[L_SOUND], *ss = stored[L_SOUND_SH];
+	float *pa = stored[L_PAT], *ps = stored[L_PAT_SH];
+	sd[0] = near(sd[0], 0.12f, 0.08f, 0.85f);            /* cutoff    */
+	sd[1] = near(sd[1], 0.15f, 0.20f, 0.92f);            /* resonance */
+	sd[2] = near(sd[2], 0.15f, 0.05f, 0.95f);            /* decay     */
+	sd[3] = near(sd[3], 0.12f, 0.00f, 0.80f);            /* drive     */
+	ss[0] = near(ss[0], 0.15f, 0.10f, 0.95f);            /* envelope  */
+	ss[1] = near(ss[1], 0.15f, 0.10f, 1.00f);            /* accent    */
+	ss[2] = near(ss[2], 0.15f, 0.10f, 0.95f);            /* slide     */
+	ss[3] = near(ss[3], 0.12f, 0.25f, 1.00f);            /* gate      */
+	/* transpose: on the detent half the time, else a fourth, a fifth or a step away */
+	static const int8_t kSemis[8] = { 0, 0, 0, 0, 5, -5, 7, -2 };
+	const int semis = kSemis[(int)(rnd01() * 7.999f)];
+	const float r = (float)semis / 24.0f;                /* detent(v) - 0.5 */
+	pa[1] = semis == 0 ? 0.5f : 0.5f + (r > 0.0f ? 1.0f : -1.0f) *
+		(0.5f * DETENT_BIPOLAR + fabsf(r) * (1.0f - DETENT_BIPOLAR));
+	pa[3] = near(0.5f, 0.12f, 0.30f, 0.70f);             /* sparse / dense */
+	ps[0] = near(ps[0], 0.25f, 0.00f, 1.00f);            /* saw <-> pulse  */
+	ps[1] = near(ps[1], 0.15f, 0.00f, 0.90f);            /* sub            */
+	if (rnd01() < 0.2f) {
+		ps[2] = rnd_in(0.05f, 0.30f);                /* a little filter FM, now and then */
+	}
+	for (int l = 0; l < 4; l++) {
+		stored[L_LANE][l] = near(0.5f, 0.12f, 0.25f, 0.75f);
+	}
+	if (rnd01() < 0.3f) {                                /* one lane of its own length */
+		static const uint8_t kZone[4] = { 1, 3, 4, 6 };   /* 3, 5, 6, 12 steps */
+		const int l = 1 + (int)(rnd01() * 2.999f);        /* accent, slide or octave */
+		stored[L_LANE_SH][l] = ((float)kZone[(int)(rnd01() * 3.999f)] + 0.5f) /
+				       (float)SP1_ACID_LEN_ZONES;
+	}
+	if (rnd01() < 0.3f) {
+		stored[L_SET][0] = rnd_in(0.1f, 0.5f);       /* swing */
+	}
+	pt.tempo = near(pt.tempo, pt.tempo * 0.05f, TEMPO_MIN, TEMPO_MAX);
 	pickup_all();
 }
 
@@ -917,6 +988,68 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 			LOG("TEMPO %d BPM\n", (int)(pt.tempo + 0.5f));
 		}
 	}
+	/* HOME + "••": FFWD randomises (the present saved to temp first), RWD tapped undoes it
+	 * (back to temp), RWD held 1 s writes the present to the drive. */
+	rnd += dt * 2654435761u;                          /* the seed is the player's timing */
+	if (home && fnc) {
+		if (ffwd_press) {
+			uint8_t lv[4] = { 0u, SP1_ENGINE_LED_FULL, SP1_ENGINE_LED_FULL, 0u };
+			if (!random_pending) {
+				sp1_dui_get(&temp);
+				temp_ok = true;
+			}
+			random_pending = true;
+			undo_pending = false;
+			flash(lv);
+			LOG("RANDOM at the bar (what plays now is in temp: \"••\" + RWD undoes it)\n");
+		}
+		if (rwd_press) {
+			rw_fn_ms = 0u;
+			rw_fn_done = false;
+		}
+		if (rwd_down && !rw_fn_done) {
+			rw_fn_ms += dt;
+			if (rw_fn_ms >= 1000u) {
+				const uint8_t lv[4] = { SP1_ENGINE_LED_FULL, SP1_ENGINE_LED_FULL,
+							SP1_ENGINE_LED_FULL, SP1_ENGINE_LED_FULL };
+				rw_fn_done = true;
+				flash(lv);
+				act |= SP1_DUI_ACT_WRITE;
+				LOG("WRITE this to the drive\n");
+			}
+		}
+		if ((k->released & BIT(SP1_BTN_RWD)) && !rw_fn_done) {
+			if (temp_ok) {
+				const uint8_t lv[4] = { SP1_ENGINE_LED_FULL, 0u, 0u, SP1_ENGINE_LED_FULL };
+				undo_pending = true;
+				random_pending = false;
+				flash(lv);
+				LOG("UNDO at the bar: back to temp\n");
+			} else {
+				LOG("UNDO: nothing in temp yet (\"••\" + FFWD randomises and fills it)\n");
+			}
+		}
+	}
+	if (random_pending || undo_pending) {
+		struct sp1_drums_status st;
+		sp1_drums_status(&st);
+		if (st.step < 0 || (st.step == 0 && home_step_was != 0)) {
+			if (random_pending) {
+				randomise();
+				const struct sp1_acid_scene *sc = sp1_acid_scene(scene_sel);
+				LOG("RANDOM: scene %d (%s, %s) at %d BPM, its pages moved\n", scene_sel + 1,
+				    sp1_acid_preset(sc->pattern)->name, sp1_drums_kit_name(sc->kit),
+				    (int)(pt.tempo + 0.5f));
+			} else {
+				sp1_dui_put(&temp);
+				LOG("UNDO: back to temp (%s, %d BPM)\n", sp1_drums_bass_name(pt.bass_mode),
+				    (int)(pt.tempo + 0.5f));
+			}
+			random_pending = undo_pending = false;
+			scene_pending = kit_pending = -1;
+		}
+		home_step_was = st.step;
+	}
 	{
 		if (scene_sel < 0) {                       /* after a preset or the defaults */
 			scene_sel = zone_h(&zh_scene, stored[L_HOME][2], SP1_ACID_SCENES);
@@ -936,6 +1069,10 @@ uint32_t sp1_dui_keys(uint32_t dt, const struct sp1_dui_keys *k)
 			    (int)(bpm + 0.5f), bpm < ap->bpm ? " (written faster; HOME stops at 140)" : "");
 		}
 		const int kz = zone_h(&zh_kit, stored[L_HOME][1], SP1_DRUMS_KITS);
+		if (kz == pt.kit && kit_pending >= 0) {
+			kit_pending = -1;                  /* the fader came back before the bar */
+			LOG("KIT %d: %s (stays)\n", kz + 1, sp1_drums_kit_name(kz));
+		}
 		if (scene_pending < 0 && kz != pt.kit && kz != kit_pending) {
 			uint8_t lv[4];
 			kit_pending = kz;

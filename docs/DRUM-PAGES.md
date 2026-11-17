@@ -1,5 +1,7 @@
 # The drum firmware — every control (CONFIG_SP1_DRUMS)
 
+*How to play it, in short: `docs/MANUAL.md`. This page is the reference.*
+
 The drum firmware replaces the Plaits voice with a four-voice drum kit, a step sequencer, a
 bass voice, four bus effects and the rocker's rhythm tricks. Marbles stays the rhythm brain:
 its clock drives the sequencer, and its t and X outputs can be cabled to the drums, the kit,
@@ -73,6 +75,14 @@ muted), at 120 BPM.
   them. Jungle (165), thrash (180) and footwork (160) were written faster than HOME's 140,
   so they play at 140 (the log says so).
 - **F4, DJ filter**: adds to KIT + SHIFT F1, so it sweeps whatever the kit page set.
+- **`••` + FFWD** randomises: what plays goes to *temp*, then at the bar a random other scene
+  is loaded and every performance page is moved a little from it (sound and lanes near the
+  scene's, transpose 0 half the time else ±5, +7 or −2, a 30 % chance of one lane of
+  another length, 20 % of a little filter FM, 30 % of swing, the tempo ±5 %). The console
+  names what it chose. **`••` + RWD tapped** undoes: at the bar, back to temp (one
+  randomise back). **`••` + RWD held 1 s** writes the present to the current PRST slot on
+  the drive while playing (`PRST write slot 1: writing`); the log keeps running, and the
+  shutdown save waits for it and follows.
 - **HOME + SHIFT** is what SETTINGS was. SETTINGS' buttons are gone: the mutes are
   `••` + T*n* on a drum page, the rest style is drums.cnfg's `rest_style`, the old Y / rests
   bass is drums.cnfg's `[bass]` with `[acid] start = off`, and the pattern swap between kits
@@ -309,7 +319,7 @@ that output goes back to none.
 |---|---|---|---|---|
 | **T1–T4** | open SOUND · PATTERN · LANES · KIT | the same (T1 on SOUND: the line off / on) | the same | the same |
 | **`••` + T1–T4** | open DRUM *n* | open DRUM *n* | open DRUM *n* | open DRUM *n*; its own: **mute / unmute** it |
-| **`••` + FFWD / RWD** | — | **next / previous acid pattern** (at the bar) | **next / previous kit** | **next / previous model** |
+| **`••` + FFWD / RWD** | FFWD **randomise**; RWD tap **undo**, held 1 s **write** | **next / previous acid pattern** (at the bar) | **next / previous kit** | **next / previous model** |
 | **FFWD / RWD** | **tempo**: tap ±1 BPM, held a glide | **keep / undo** (tap), **add / snap back** (held) | the rhythm tricks, below | the same, for that drum |
 | **PLAY** | Marbles' clock run / stop | the same | the same | the same |
 
@@ -542,6 +552,16 @@ alone is 218-274 instructions a sample under Callgrind on x86-64 (`acidbench.c`;
 124). Built with `-DTA_OS=1` (the ladder once a sample instead of twice) the same eight rows
 were 3-6 points lower when measured before the fader recording went in (the last row then:
 57.8 % / 93.7 % against 60.0 % / 99.2 %). Not measured on an SP-1.
+
+**Every scene** (`node tools/host-tests/drums-emu/scene-cpu.mjs emulator/web`, HOME F3
+through the list, 4 s each after a bar to settle): averages 34–67 %, heaviest blocks 61–85 %;
+dub-techno is the heaviest (67 % / 85 %) and the modal-kit scenes next (around 80 %). Its
+scene once also sent the bus through the FM with three drums: 96.6 % and tails faded, so
+the scene now mutes drums 2 and 4 and leaves the FM at zero. The meter reads modal voices
+about 15 points light (emulator/README.md), so on the device those scenes are the ones to
+watch. Two guards: above **75 %** of a block the acid filter runs once a sample instead of
+twice until the load is back under 60 % (`CPU guard: the acid filter at one pass`), and
+above 80 % the quietest drum tail is faded as before.
 
 The modal kits (modal gamelan, iron vibes) peak highest, when four voices are struck on the
 same 16th. Wakes queues one block, so a single block over budget is absorbed without a

@@ -106,12 +106,13 @@ static const struct sp1_acid_preset kPresets[SP1_ACID_PRESETS] = {
 	  ". E1 E1 E1 . E1 E1 E1 | . E1 E1 E1 . E1 G1 E1",
 	  0, { 0.40f, 0.45f, 0.45f, 0.15f, 0.50f, 0.20f, 0.0f, 0.0f, 0.20f, 0.0f, 0.0f, 0.30f, 0.30f, 1.0f },
 	  0.40f, { 0.5f, 0.0f, 0.0f, 0.0f }, 145.0f, { 0, 0, 0, 0 } },
-	/* 19: dub-techno. A stab off the beat with a long tail and a little noise: made to be
-	 * filtered and sent through the FM. */
+	/* 19: dub-techno. A stab off the beat with a long tail and a little noise, made to be
+	 * filtered. Its scene once also sent the bus through the FM with three drums playing:
+	 * the one scene over the CPU budget. KIT + SHIFT F4 brings the FM back by hand. */
 	{ "dub-techno",
 	  ". . D2 . . . D2 _ | . . D2 . . F2~ _ .",
 	  1, { 0.35f, 0.55f, 0.60f, 0.80f, 0.40f, 0.10f, 0.60f, 0.30f, 0.20f, 0.10f, 0.0f, 0.60f, 0.20f, 1.0f },
-	  0.50f, { 0.40f, 0.0f, 0.0f, 0.15f }, 118.0f, { 0, 0, 0, 0 } },
+	  0.50f, { 0.40f, 0.0f, 0.0f, 0.0f }, 118.0f, { 0, 0, 0, 0 } },
 	/* 20: uk-garage. A skipping sub that leaves the two and the four alone; play it swung. */
 	{ "uk-garage",
 	  "C2 . . C2 . . . G1~ | . A#1 . . C2! . D#2~ .",
@@ -414,7 +415,7 @@ static const struct sp1_acid_scene kScenes[SP1_ACID_SCENES] = {
 	{  4, 3, 0x0A, 0.0f }, {  5, 4, 0x0A, 0.0f }, {  6, 2, 0x0A, 0.0f }, {  7, 0, 0x0A, 0.0f },
 	{  8, 1, 0x00, 0.0f }, {  9, 2, 0x0A, 0.0f }, { 10, 0, 0x08, 0.0f }, { 11, 2, 0x0A, 0.0f },
 	{ 12, 0, 0x0A, 0.0f }, { 13, 7, 0x0E, 0.0f }, { 14, 3, 0x0A, 0.0f }, { 15, 0, 0x0A, 0.0f },
-	{ 16, 4, 0x0A, 0.0f }, { 17, 0, 0x0A, 0.0f }, { 18, 4, 0x00, 0.0f }, { 19, 1, 0x08, 0.7f },
+	{ 16, 4, 0x0A, 0.0f }, { 17, 0, 0x0A, 0.0f }, { 18, 4, 0x0A, 0.0f }, { 19, 1, 0x08, 0.7f },
 	{ 20, 0, 0x0A, 0.0f }, { 21, 5, 0x0A, 0.0f }, { 22, 2, 0x08, 0.4f }, { 23, 3, 0x0A, 0.0f },
 	{ 24, 1, 0x00, 0.0f }, { 25, 5, 0x0A, 0.0f }, { 26, 3, 0x08, 0.0f },
 };

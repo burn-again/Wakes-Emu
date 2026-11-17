@@ -45,6 +45,7 @@ enum { TA_CHAR_303, TA_CHAR_101, TA_NCHAR };
 typedef struct {
   float p[TA_NPARAM];
   uint8_t chr, gate, accented, att, dirty;
+  uint8_t lite;                         /* 1: the ladder once a sample, not TA_OS times (ta_lite) */
   uint32_t blk_n;                       /* the block length the per-block coefficients are for */
   uint32_t phase, sub_phase, inc, rng;
   float note, target;                   /* MIDI numbers; note glides to target */
@@ -64,6 +65,10 @@ void ta_set(ta_voice *v, unsigned param, float value);      /* 0..1 */
 void ta_note(ta_voice *v, float note, unsigned flags);       /* gate on */
 void ta_gate_off(ta_voice *v);
 void ta_duck(ta_voice *v, float octaves);                    /* a kick: the cutoff dips and comes back */
+/* Under load: the ladder runs once a sample until called again with 0. The coefficients ramp
+ * across the next block, so the change is not a click; the sound is a little brighter at the
+ * top and aliases more at high resonance. */
+void ta_lite(ta_voice *v, int on);
 void ta_render_mix(ta_voice *v, float *out, unsigned n, float gain);   /* adds into out */
 int  ta_active(const ta_voice *v);
 unsigned ta_voice_size(void);

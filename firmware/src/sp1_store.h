@@ -139,6 +139,9 @@ const struct sp1_prst *sp1_store_prst_slot(int slot);
 /* Main thread, at shutdown: write `p` into `slot` and make it the current one. Queues the
  * job and returns; false if it could not be queued (PRST is not READY). Poll the result. */
 bool sp1_store_prst_save(int slot, const struct sp1_prst *p);
+/* Main thread, while ON (HOME "••" + RWD held): the same write, but the log keeps running
+ * and the card stays mounted for it. False also while a save is still in flight. */
+bool sp1_store_prst_save_live(int slot, const struct sp1_prst *p);
 enum sp1_store_save {
 	SP1_STORE_SAVE_IDLE = 0,
 	SP1_STORE_SAVE_BUSY,

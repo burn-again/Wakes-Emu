@@ -165,6 +165,8 @@ constexpr float kLevThresh = 0.85f;
 constexpr float kLevRelease24 = 0.99667f;              // exp(-24 / (0.15 s x 48 kHz))
 constexpr float kShedAt = 0.80f;     // the CPU guard: a block's render above this share...
 constexpr float kShedTail = 0.1f;    // ...fades the quietest voice below this level (-20 dB)
+constexpr float kLiteOn = 0.75f;     // the acid voice's ladder once a sample above this share...
+constexpr float kLiteOff = 0.60f;    // ...and twice again once a block is back under this
 constexpr int kMap = 32;                   // the longest map / loop
 
 // ---- this block's controls, and the voices ----
@@ -193,6 +195,7 @@ bool mot_fill = true;                      // the record holds nothing yet: fill
 uint32_t keep_seen, undo_seen, snap_seen;
 uint8_t acid_mode_was;
 volatile uint8_t st_takes;
+volatile uint32_t st_lite;                 // how often the acid voice went lite since boot
 volatile float st_acid_now[4];
 int fade_left[SP1_DRUMS_N];                // samples left in a choke fade; 0 = none
 
@@ -654,6 +657,11 @@ extern "C" void sp1_drums_set_drive(float gain) {
 extern "C" void sp1_drums_load(uint32_t cycles, uint32_t frames) {
   // 64 MHz / 48 kHz = 1333.3 cycles per sample (sp1_console.h)
   load_now = frames > 0u ? static_cast<float>(cycles) / (static_cast<float>(frames) * 1333.33f) : 0.0f;
+  // The acid voice's half of the CPU guard: a heavy block makes its ladder run once a sample
+  // (about 40 instructions a sample less) until the load has fallen well back. Before the
+  // drums' guard, so the line gives way first and a tail is faded only if that was not enough.
+  if (load_now > kLiteOn && !acid.lite) { ta_lite(&acid, 1); st_lite = st_lite + 1u; }
+  else if (load_now < kLiteOff && acid.lite) ta_lite(&acid, 0);
 }
 
 extern "C" void sp1_drums_clock(uint32_t frames, bool external) {
@@ -1050,5 +1058,6 @@ extern "C" void sp1_drums_status(struct sp1_drums_status* out) {
   out->bass_notes = st_bass;
   out->shed = st_shed;
   out->acid_takes = st_takes;
+  out->acid_lite = st_lite;
   for (int k = 0; k < 4; ++k) out->acid_now[k] = st_acid_now[k];
 }
